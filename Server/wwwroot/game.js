@@ -328,6 +328,7 @@ function update(time) {
     r.label.setPosition(r.rect.x, r.rect.y - 38);
   }
   updateGifs();
+  positionChat();
 }
 
 // ---- Controles de toque (celular) ----
@@ -346,7 +347,7 @@ if (matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window) {
 // ---- Chat ----
 const chatEl = document.getElementById('chat');
 const chatLog = document.getElementById('chatLog');
-const chatOpenBtn = document.getElementById('chatOpen');
+const OLD_AFTER_MS = 12000; // linhas antigas ficam mais apagadas, como em chats de MMORPG
 
 // Usa textContent (nunca innerHTML) para que mensagens não injetem HTML
 function addChatLine(name, text) {
@@ -360,26 +361,31 @@ function addChatLine(name, text) {
     who.textContent = name + ': ';
     p.append(who, document.createTextNode(text));
   }
-  const atBottom = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 40;
   chatLog.appendChild(p);
-  while (chatLog.children.length > 200) chatLog.firstChild.remove();
-  if (atBottom || name === myName) chatLog.scrollTop = chatLog.scrollHeight;
+  while (chatLog.children.length > 100) chatLog.firstChild.remove();
+  setTimeout(() => p.classList.add('old'), OLD_AFTER_MS);
 }
 
-function setChatOpen(open) {
-  chatEl.classList.toggle('open', open);
-  chatOpenBtn.classList.toggle('show', !open);
-  window.dispatchEvent(new Event('resize')); // o Phaser reajusta o canvas à nova largura
+// Mantém o chat DENTRO da área do jogo (canvas), mesmo quando há faixas pretas ao redor
+const coarsePointer = matchMedia('(pointer: coarse)').matches;
+function positionChat() {
+  const r = phaserGame.canvas.getBoundingClientRect();
+  chatEl.style.left = r.left + 12 + 'px';
+  chatEl.style.width = Math.min(coarsePointer ? 250 : 360, r.width * 0.45) + 'px';
+  chatLog.style.maxHeight = r.height * (coarsePointer ? 0.3 : 0.26) + 'px';
+  if (coarsePointer) { // no celular os botões de toque ocupam a parte de baixo: chat no topo
+    chatEl.style.top = r.top + 8 + 'px';
+    chatEl.style.bottom = 'auto';
+  } else {
+    chatEl.style.bottom = innerHeight - r.bottom + 12 + 'px';
+    chatEl.style.top = 'auto';
+  }
 }
 
 function setupChat() {
-  setChatOpen(innerWidth > 900); // em tela pequena começa recolhido
-  document.getElementById('chatClose').onclick = () => setChatOpen(false);
-  chatOpenBtn.onclick = () => setChatOpen(true);
-
+  chatEl.classList.add('on');
   connection.on('ChatHistory', list => list.forEach(m => addChatLine(m.name, m.text)));
   connection.on('ChatMessage', m => { addChatLine(m.name, m.text); showBubble(m.id, m.text); });
-
   chatReady = true;
 }
 
@@ -390,11 +396,13 @@ let chatReady = false;
 
 function openChatBar() {
   chatBar.hidden = false;
+  chatEl.classList.add('active');
   chatInput.focus();
 }
 
 function closeChatBar() {
   chatBar.hidden = true;
+  chatEl.classList.remove('active');
   chatInput.value = '';
   chatInput.blur(); // devolve o controle ao teclado do jogo
 }
