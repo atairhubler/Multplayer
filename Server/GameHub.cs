@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.SignalR;
 
 public class GameHub : Hub
@@ -12,7 +13,7 @@ public class GameHub : Hub
         {
             Id = Context.ConnectionId,
             Name = string.IsNullOrWhiteSpace(name) ? "Anon" : name.Trim()[..Math.Min(name.Trim().Length, 16)],
-            CharacterSprite = character,
+            CharacterSprite = SanitizeCharacter(character),
             X = 100,
             Y = 400
         };
@@ -25,6 +26,19 @@ public class GameHub : Hub
 
         await Clients.Caller.SendAsync("ExistingPlayers", existing);
         await Clients.OthersInGroup(Room).SendAsync("PlayerJoined", player);
+    }
+
+    private static readonly string[] Colors = { "red", "blue", "green", "yellow" };
+    private static readonly Regex ImageDataUrl = new(@"^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$", RegexOptions.Compiled);
+    private const int MaxImageChars = 40_000;
+
+    // Aceita uma cor conhecida ou uma imagem pequena em data URL; qualquer outra coisa vira "red"
+    private static string SanitizeCharacter(string? character)
+    {
+        if (character is null) return "red";
+        if (Colors.Contains(character)) return character;
+        if (character.Length <= MaxImageChars && ImageDataUrl.IsMatch(character)) return character;
+        return "red";
     }
 
     public async Task UpdatePosition(float x, float y)

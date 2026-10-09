@@ -5,7 +5,7 @@ var builder = WebApplication.CreateBuilder(args);
 var allowedOrigins = (Environment.GetEnvironmentVariable("ALLOWED_ORIGINS") ?? "")
     .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-builder.Services.AddSignalR();
+builder.Services.AddSignalR(o => o.MaximumReceiveMessageSize = 64 * 1024); // avatares enviados como data URL
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
 {
     if (allowedOrigins.Length > 0) p.WithOrigins(allowedOrigins);

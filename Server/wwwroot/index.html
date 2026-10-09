@@ -19,6 +19,9 @@
     .avatars span { display: block; width: 36px; height: 48px; border: 3px solid transparent; border-radius: 4px; }
     .avatars input:checked + span { border-color: #fff; }
     button { width: 100%; padding: 10px; font-size: 16px; cursor: pointer; }
+    .upload { display: flex; align-items: center; gap: 10px; margin: 6px 0 18px; font-size: 12px; }
+    .upload input { max-width: 190px; }
+    #avatarPreview { width: 36px; height: 54px; object-fit: cover; border: 3px solid #fff; border-radius: 4px; }
     #error { color: #f77; margin-top: 10px; min-height: 18px; font-size: 13px; }
     #game { width: 100vw; height: 100vh; }
     #touch { display: none; position: fixed; left: 0; right: 0; bottom: 16px; padding: 0 16px; box-sizing: border-box;
@@ -41,6 +44,11 @@
         <label><input type="radio" name="char" value="blue"><span style="background:#3498db"></span></label>
         <label><input type="radio" name="char" value="green"><span style="background:#2ecc71"></span></label>
         <label><input type="radio" name="char" value="yellow"><span style="background:#f1c40f"></span></label>
+      </div>
+      <label>Ou envie sua imagem</label>
+      <div class="upload">
+        <input id="avatarFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif">
+        <img id="avatarPreview" alt="" hidden>
       </div>
       <button id="join">Entrar no Jogo</button>
       <div id="error"></div>
