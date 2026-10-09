@@ -165,3 +165,13 @@
 .invDetail h3 { margin: 0; } .invDetail p { margin: 2px 0; } .invDetail .desc { color: #cfe0ff; font-size: 14px; }
 .invDetail .wide { width: 100%; } .invDetail .wide.primary, .invWrap .wide.primary { background: linear-gradient(#d8a63a, #a87414); color: #221800; font-weight: 700; }
 #infoBody .note.good { color: #8be37f; } #infoBody .note.bad { color: #ff9a8f; }
+
+/* inventário mais compacto */
+.ico.potion.huge { font-size: 40px; }
+.invWrap { flex-wrap: nowrap; gap: 10px; }
+.invGrid { flex: 1 1 auto; grid-template-columns: repeat(auto-fill, 56px); gap: 6px; }
+.invSlot { width: 56px; height: 56px; } .invSlot .ico.potion { font-size: 34px; }
+.invDetail { flex: 0 0 210px; padding: 8px 10px; gap: 3px; }
+.invDetail h3 { font-size: 15px; } .invDetail .desc { font-size: 12px; } .invDetail p { font-size: 12px; }
+.invDetail button { padding: 4px 10px; font-size: 13px; }
+.invDetail .note { font-size: 11px; margin: 2px 0 0; }
