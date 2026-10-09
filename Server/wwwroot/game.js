@@ -526,6 +526,7 @@ function create() {
     else if (remotePlayers[id]) remotePlayers[id].dancing = on;
   });
   connection.on('TagState', onTagState);
+  connection.on('AccountData', onAccountData);
   connection.on('TitleEarned', onTitleEarned);
   connection.on('PlayerLeft', id => {
     const r = remotePlayers[id];
@@ -545,14 +546,14 @@ function create() {
 
   connection.invoke('JoinGame', myName, myCharacter);
   // liga esta conexão à conta Google (se o servidor for antigo e não tiver o método, ignora o erro)
+  const sendProfile = () => connection.invoke('UpdateProfile', localInfo.nameColor, localInfo.title).catch(() => {});
   if (sessionToken) {
+    // com conta: o servidor manda o que está salvo (evento AccountData, que também envia o perfil)
     connection.invoke('Authenticate', sessionToken).then(r => {
-      if (r?.ok) addChatLine(null, '🔐 Conectado com a sua conta Google. Em breve o seu progresso será salvo.', true);
-      else if (r) { clearAccount(); addChatLine(null, '⚠️ Sua sessão do Google expirou. Volte à tela de entrada e entre com o Google de novo para salvar o progresso.'); }
-    }).catch(() => {});
-  }
-  // cor do nome e título (se o servidor for antigo e não tiver o método, ignora o erro)
-  connection.invoke('UpdateProfile', localInfo.nameColor, localInfo.title).catch(() => {});
+      if (r?.ok) addChatLine(null, '🔐 Conectado com a sua conta Google. Seus pontos, títulos e cor do nome são salvos automaticamente. Digite /perfil ou /ranking.', true);
+      else { if (r) { clearAccount(); addChatLine(null, '⚠️ Sua sessão do Google expirou. Volte à tela de entrada e entre com o Google de novo para salvar o progresso.'); } sendProfile(); }
+    }).catch(sendProfile);
+  } else sendProfile(); // cor do nome e título (se o servidor for antigo e não tiver o método, ignora o erro)
 }
 
 function update(time, delta) {
@@ -1577,6 +1578,15 @@ function equipTitle(t) {
   refreshLabel(myId());
   connection.invoke('UpdateProfile', localInfo.nameColor, t).catch(() => {});
 }
+// Dados salvos na conta Google: títulos (somados aos do navegador), cor do nome e título equipado
+function onAccountData(d) {
+  const merged = [...new Set([...getTitles(), ...(d.titles || [])])];
+  try { localStorage.setItem('titles', JSON.stringify(merged)); } catch {}
+  if (d.nameColor && /^#[0-9a-f]{6}$/i.test(d.nameColor)) { localInfo.nameColor = d.nameColor; cName.value = d.nameColor; saveProfile(); }
+  if (d.title && merged.includes(d.title)) { try { localStorage.setItem('title', d.title); } catch {} localInfo.title = d.title; }
+  refreshLabel(myId());
+  connection.invoke('UpdateProfile', localInfo.nameColor, localInfo.title).catch(() => {}); // grava na conta o perfil que está valendo
+}
 function onTitleEarned(t) {
   try { localStorage.setItem('titles', JSON.stringify([...new Set([...getTitles(), t])])); } catch {}
   addChatLine(null, `🏆 Você conquistou o título "${t}"! Ele já está equipado. Digite /titulo para ver todos.`);
@@ -1697,6 +1707,12 @@ const HELP = {
     'Clique na projeção de qualquer pessoa para ampliar (Esc fecha). Só funciona para compartilhar em computador; assistir funciona em qualquer aparelho.',
   ],
   titulo: null,
+  perfil: [
+    '🧾 Perfil: digite /perfil para ver seus pontos de combate, slimes e jogadores derrotados, derrotas e títulos. Precisa ter entrado com o Google; tudo é salvo na sua conta e continua valendo em qualquer aparelho.',
+  ],
+  ranking: [
+    '🏆 Ranking: digite /ranking para ver os 10 que mais pontuaram no combate (arena e floresta) em todos os tempos, entre quem entra com o Google.',
+  ],
   cor: [
     '🎨 Cor do nome: digite /cor seguido de um código de cor, por exemplo /cor #ff8800. Você também escolhe na tela de entrada.',
   ],
@@ -1712,7 +1728,7 @@ const HELP_GROUPS = [
   { title: '🤝 Ações sociais', keys: ['emote', 'cumprimentar', 'empurrar', 'subir', 'danca'] },
   { title: '🏃 Jogos e vilarejo', keys: ['pique', 'vilarejo'] },
   { title: '🎧 Voz e tela', keys: ['voz', 'compartilhar'] },
-  { title: '🎨 Perfil', keys: ['titulo', 'cor'] },
+  { title: '🎨 Perfil e ranking', keys: ['titulo', 'cor', 'perfil', 'ranking'] },
 ];
 const HELP_EXTRA = {
   titulo: [
@@ -1769,6 +1785,8 @@ function runCommand(text) {
       '/vilarejo — interagir com a fonte, barracas e porta',
       '/titulo — ver e escolher seus títulos',
       '/cor — mudar a cor do seu nome',
+      '/perfil — seus pontos e conquistas (conta Google)',
+      '/ranking — os 10 que mais pontuaram no combate',
       '/voz — chat de voz com microfone',
       '/compartilhar — compartilhar sua tela numa projeção sobre a sua cabeça',
       '/arena — como entrar na arena e lutar',
@@ -1789,10 +1807,28 @@ function runCommand(text) {
     if (args[0]?.toLowerCase() === 'ajuda') return say(HELP.compartilhar);
     return share.on ? stopShare() : startShare();
   }
+  if (cmd === 'ranking') return showRanking();
+  if (cmd === 'perfil') return showProfile();
   if (cmd === 'titulo') return titleCommand(args);
   if (cmd === 'cor' && args[0]) return colorCommand(args[0]);
   if (HELP[cmd]) return say(HELP[cmd]);
   say([`Comando desconhecido: /${raw}. Digite /comandos para ver a lista.`]);
+}
+
+function showRanking() {
+  connection.invoke('GetRanking').then(r => {
+    if (!r?.ok) return say([r?.reason || 'Não consegui ler o ranking agora.']);
+    if (!r.rows.length) return say(['🏆 Ainda ninguém pontuou no combate. Vá à arena ou à floresta!']);
+    say(['🏆 Ranking de combate (todos os tempos):', ...r.rows.map((x, i) => `${i + 1}º ${x.name} — ${x.points} pts · ${x.slimeKills} slimes · ${x.playerKills} jogadores`)]);
+  }).catch(() => say(['O servidor ainda não tem o ranking (ele pode estar atualizando). Tente de novo em alguns minutos.']));
+}
+
+function showProfile() {
+  connection.invoke('GetMyStats').then(r => {
+    if (!r?.ok) return say([r?.reason || 'Não consegui ler o perfil agora.']);
+    say(['🧾 Seu perfil:', `⭐ ${r.points} pontos de combate`, `🟢 ${r.slimeKills} slimes derrotados · ⚔️ ${r.playerKills} jogadores derrotados · 💀 ${r.deaths} derrotas`,
+      r.titles.length ? '🏷️ Títulos: ' + r.titles.join(', ') : '🏷️ Nenhum título ainda.']);
+  }).catch(() => say(['O servidor ainda não tem o perfil (ele pode estar atualizando). Tente de novo em alguns minutos.']));
 }
 
 function titleCommand(args) {

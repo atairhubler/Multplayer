@@ -86,7 +86,50 @@ public class GameHub(IHubContext<GameHub> hubContext, Db db, Sessions sessions) 
         catch (Exception) { return new { ok = false, reason = "banco indisponível" }; }
         if (account is null) return new { ok = false, reason = "conta não encontrada" };
         me.AccountId = account.Id;
+        try
+        {
+            // devolve o que já foi conquistado nesta conta (títulos, estatísticas, cor do nome...)
+            var data = await db.LoadAccountDataAsync(account.Id);
+            var pend = Progress.PendingFor(account.Id);
+            await Clients.Caller.SendAsync("AccountData", new
+            {
+                name = account.Name,
+                stats = new { points = data.Stats.Points + pend.Points, playerKills = data.Stats.PlayerKills + pend.PlayerKills, slimeKills = data.Stats.SlimeKills + pend.SlimeKills, deaths = data.Stats.Deaths + pend.Deaths },
+                titles = data.Titles,
+                nameColor = data.NameColor,
+                title = data.EquippedTitle,
+            });
+        }
+        catch (Exception) { /* sem os dados salvos o jogo segue normal */ }
         return new { ok = true, name = account.Name };
+    }
+
+    // /ranking: os 10 com mais pontos de combate de todos os tempos (contas Google)
+    public async Task<object> GetRanking()
+    {
+        if (!db.Enabled) return new { ok = false, reason = "O banco de dados não está disponível." };
+        if (!Allow(1500)) return new { ok = false, reason = "Calma! Tente de novo em um instante." };
+        try
+        {
+            await Progress.FlushAsync(); // inclui o que ainda estava na memória
+            var top = await db.TopAsync(10);
+            return new { ok = true, rows = top.Select(t => new { name = t.Name, points = t.Points, slimeKills = t.SlimeKills, playerKills = t.PlayerKills }) };
+        }
+        catch (Exception) { return new { ok = false, reason = "Não consegui ler o ranking agora." }; }
+    }
+
+    // /perfil: estatísticas da própria conta
+    public async Task<object> GetMyStats()
+    {
+        if (!Players.TryGetValue(Context.ConnectionId, out var me) || me.AccountId is not long id || !db.Enabled)
+            return new { ok = false, reason = "Entre com o Google na tela inicial para ter perfil e progresso salvos." };
+        try
+        {
+            var data = await db.LoadAccountDataAsync(id);
+            var pend = Progress.PendingFor(id);
+            return new { ok = true, points = data.Stats.Points + pend.Points, playerKills = data.Stats.PlayerKills + pend.PlayerKills, slimeKills = data.Stats.SlimeKills + pend.SlimeKills, deaths = data.Stats.Deaths + pend.Deaths, titles = data.Titles };
+        }
+        catch (Exception) { return new { ok = false, reason = "Não consegui ler o perfil agora." }; }
     }
 
     // Cor do nome e título exibido (chamado logo depois de JoinGame; servidores antigos não têm este método)
@@ -95,6 +138,7 @@ public class GameHub(IHubContext<GameHub> hubContext, Db db, Sessions sessions) 
         if (!Players.TryGetValue(Context.ConnectionId, out var p)) return;
         p.NameColor = nameColor is not null && ColorPattern.IsMatch(nameColor) ? nameColor.ToLowerInvariant() : null;
         p.Title = title is not null && AllowedTitles.Contains(title) ? title : null;
+        Progress.SaveProfile(p.Id, p.NameColor, p.Title); // (só grava se a pessoa entrou com o Google)
         await Clients.Group(Room).SendAsync("PlayerProfile", p.Id, p.NameColor, p.Title);
     }
 
@@ -179,6 +223,7 @@ public class GameHub(IHubContext<GameHub> hubContext, Db db, Sessions sessions) 
     internal static async Task AwardTitle(IHubContext<GameHub> hub, string connectionId, string title)
     {
         if (!GrantedTitles.TryAdd(connectionId + "|" + title, 0)) return;
+        Progress.SaveTitle(connectionId, title);
         await hub.Clients.Client(connectionId).SendAsync("TitleEarned", title);
     }
 
@@ -465,6 +510,10 @@ public class GameHub(IHubContext<GameHub> hubContext, Db db, Sessions sessions) 
         AvatarStore.RemoveOwnedBy(id);
 
         lock (VoiceLock) VoiceMembers.Remove(id);
+        if (Players.TryGetValue(id, out var leaving) && leaving.AccountId is long leavingAccount)
+        {
+            try { await Progress.FlushAsync(leavingAccount); } catch (Exception) { /* o laço de 30 s tenta de novo */ }
+        }
         await ArenaGame.Disconnected(hubContext, id);
 
         if (Players.TryRemove(id, out var gone))

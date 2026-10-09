@@ -27,6 +27,7 @@ app.MapGet("/health", () => "ok"); // para ping de keep-alive
 // Banco de dados: confere se a conexão com a Neon está funcionando (não mostra senha nem endereço)
 app.MapGet("/db-health", async (Db db) => Results.Json(await db.HealthAsync()));
 
+Progress.Init(app.Services.GetRequiredService<Db>()); // grava pontos/estatísticas das contas em segundo plano
 GoogleAuth.Map(app); // POST /auth/google: login com Google
 
 // Cria as tabelas ao iniciar, sem travar o servidor se o banco estiver indisponível

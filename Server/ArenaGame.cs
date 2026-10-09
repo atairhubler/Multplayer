@@ -174,11 +174,14 @@ public static class ArenaGame
     {
         victim.Hp = Math.Max(0, victim.Hp - w.Damage);
         attacker.Score += HitPoints;
+        Progress.Add(attackerId, points: HitPoints);
         events.Add(("ArenaHit", new object?[] { attackerId, victimId, w.Damage, victim.Hp, dir, w.Knock, w.Lift, arrowId }));
         if (victim.Hp > 0) { Scores[attackerId] = attacker.Score; return; }
         victim.Alive = false;
         victim.RespawnAt = now + RespawnMs;
         attacker.Score += KillPoints;
+        Progress.Add(attackerId, points: KillPoints, playerKills: 1);
+        Progress.Add(victimId, deaths: 1);
         Scores[attackerId] = attacker.Score;
         events.Add(("ArenaKill", new object?[] { attackerId, victimId }));
     }
@@ -204,6 +207,7 @@ public static class ArenaGame
         sl.Hp = Math.Max(0, sl.Hp - w.Damage);
         sl.X = Math.Clamp(sl.X + dir * w.Knock * 0.08f, 60, ForestW - 60);
         attacker.Score += HitPoints;
+        Progress.Add(attackerId, points: HitPoints);
         var slimeId = "slime:" + sl.Id;
         events.Add(("ArenaHit", new object?[] { attackerId, slimeId, w.Damage, sl.Hp, dir, w.Knock, w.Lift, arrowId }));
         if (sl.Hp <= 0)
@@ -211,6 +215,7 @@ public static class ArenaGame
             sl.Alive = false;
             sl.RespawnAt = now + SlimeRespawnMs;
             attacker.Score += (int)(SlimeKillPoints * sl.Mult); // slime evoluído vale mais
+            Progress.Add(attackerId, points: (int)(SlimeKillPoints * sl.Mult), slimeKills: 1);
             events.Add(("ArenaKill", new object?[] { attackerId, slimeId, sl.Level }));
         }
         Scores[attackerId] = attacker.Score;
@@ -334,6 +339,7 @@ public static class ArenaGame
                             if (pst.Hp <= 0)
                             {
                                 pst.Alive = false; pst.RespawnAt = now + RespawnMs;
+                                Progress.Add(pid, deaths: 1);
                                 events.Add(("ArenaKill", new object?[] { "slime:" + sl.Id, pid, sl.Level }));
                                 EvolveSlime(sl, GameHub.Players[pid].Name, events); // matou um jogador: evolui
                             }

@@ -60,6 +60,33 @@ public sealed class Db
                 created_at    timestamptz NOT NULL DEFAULT now(),
                 last_login_at timestamptz NOT NULL DEFAULT now()
             );
+
+            -- estatísticas de combate (somadas de todas as sessões)
+            CREATE TABLE IF NOT EXISTS account_stats (
+                account_id   bigint PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+                points       bigint NOT NULL DEFAULT 0,
+                player_kills integer NOT NULL DEFAULT 0,
+                slime_kills  integer NOT NULL DEFAULT 0,
+                deaths       integer NOT NULL DEFAULT 0,
+                updated_at   timestamptz NOT NULL DEFAULT now()
+            );
+            CREATE INDEX IF NOT EXISTS account_stats_points_idx ON account_stats (points DESC);
+
+            -- títulos conquistados
+            CREATE TABLE IF NOT EXISTS account_titles (
+                account_id bigint NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                title      text NOT NULL,
+                earned_at  timestamptz NOT NULL DEFAULT now(),
+                PRIMARY KEY (account_id, title)
+            );
+
+            -- preferências: cor do nome e título equipado
+            CREATE TABLE IF NOT EXISTS account_profile (
+                account_id     bigint PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+                name_color     text,
+                equipped_title text,
+                updated_at     timestamptz NOT NULL DEFAULT now()
+            );
             """);
         await cmd.ExecuteNonQueryAsync();
     }
@@ -82,6 +109,87 @@ public sealed class Db
         await using var r = await cmd.ExecuteReaderAsync();
         await r.ReadAsync();
         return new Account(r.GetInt64(0), r.GetString(1), r.IsDBNull(2) ? null : r.GetString(2));
+    }
+
+    public async Task AddStatsAsync(long accountId, long points, int playerKills, int slimeKills, int deaths)
+    {
+        await using var cmd = Source.CreateCommand("""
+            INSERT INTO account_stats (account_id, points, player_kills, slime_kills, deaths)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (account_id) DO UPDATE
+                SET points = account_stats.points + EXCLUDED.points,
+                    player_kills = account_stats.player_kills + EXCLUDED.player_kills,
+                    slime_kills = account_stats.slime_kills + EXCLUDED.slime_kills,
+                    deaths = account_stats.deaths + EXCLUDED.deaths,
+                    updated_at = now()
+            """);
+        cmd.Parameters.AddWithValue(accountId);
+        cmd.Parameters.AddWithValue(points);
+        cmd.Parameters.AddWithValue(playerKills);
+        cmd.Parameters.AddWithValue(slimeKills);
+        cmd.Parameters.AddWithValue(deaths);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    public async Task AddTitleAsync(long accountId, string title)
+    {
+        await using var cmd = Source.CreateCommand("INSERT INTO account_titles (account_id, title) VALUES ($1, $2) ON CONFLICT DO NOTHING");
+        cmd.Parameters.AddWithValue(accountId);
+        cmd.Parameters.AddWithValue(title);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    public async Task SaveProfileAsync(long accountId, string? nameColor, string? title)
+    {
+        await using var cmd = Source.CreateCommand("""
+            INSERT INTO account_profile (account_id, name_color, equipped_title) VALUES ($1, $2, $3)
+            ON CONFLICT (account_id) DO UPDATE SET name_color = EXCLUDED.name_color, equipped_title = EXCLUDED.equipped_title, updated_at = now()
+            """);
+        cmd.Parameters.AddWithValue(accountId);
+        cmd.Parameters.AddWithValue((object?)nameColor ?? DBNull.Value);
+        cmd.Parameters.AddWithValue((object?)title ?? DBNull.Value);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    public async Task<AccountData> LoadAccountDataAsync(long accountId)
+    {
+        var stats = new AccountStats(0, 0, 0, 0);
+        var titles = new List<string>();
+        string? color = null, equipped = null;
+        await using (var cmd = Source.CreateCommand("SELECT points, player_kills, slime_kills, deaths FROM account_stats WHERE account_id = $1"))
+        {
+            cmd.Parameters.AddWithValue(accountId);
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync()) stats = new AccountStats(r.GetInt64(0), r.GetInt32(1), r.GetInt32(2), r.GetInt32(3));
+        }
+        await using (var cmd = Source.CreateCommand("SELECT title FROM account_titles WHERE account_id = $1 ORDER BY earned_at"))
+        {
+            cmd.Parameters.AddWithValue(accountId);
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync()) titles.Add(r.GetString(0));
+        }
+        await using (var cmd = Source.CreateCommand("SELECT name_color, equipped_title FROM account_profile WHERE account_id = $1"))
+        {
+            cmd.Parameters.AddWithValue(accountId);
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync()) { color = r.IsDBNull(0) ? null : r.GetString(0); equipped = r.IsDBNull(1) ? null : r.GetString(1); }
+        }
+        return new AccountData(stats, titles, color, equipped);
+    }
+
+    // Ranking permanente: quem tem mais pontos de combate
+    public async Task<List<RankingRow>> TopAsync(int limit)
+    {
+        var list = new List<RankingRow>();
+        await using var cmd = Source.CreateCommand("""
+            SELECT a.display_name, s.points, s.slime_kills, s.player_kills
+            FROM account_stats s JOIN accounts a ON a.id = s.account_id
+            WHERE s.points > 0 ORDER BY s.points DESC, a.id LIMIT $1
+            """);
+        cmd.Parameters.AddWithValue(limit);
+        await using var r = await cmd.ExecuteReaderAsync();
+        while (await r.ReadAsync()) list.Add(new RankingRow(r.GetString(0), r.GetInt64(1), r.GetInt32(2), r.GetInt32(3)));
+        return list;
     }
 
     public async Task<Account?> GetAccountAsync(long id)
