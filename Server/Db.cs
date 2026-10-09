@@ -182,13 +182,13 @@ public sealed class Db
     {
         var list = new List<RankingRow>();
         await using var cmd = Source.CreateCommand("""
-            SELECT a.display_name, s.points, s.slime_kills, s.player_kills
+            SELECT a.id, a.display_name, s.points, s.slime_kills, s.player_kills
             FROM account_stats s JOIN accounts a ON a.id = s.account_id
             WHERE s.points > 0 ORDER BY s.points DESC, a.id LIMIT $1
             """);
         cmd.Parameters.AddWithValue(limit);
         await using var r = await cmd.ExecuteReaderAsync();
-        while (await r.ReadAsync()) list.Add(new RankingRow(r.GetString(0), r.GetInt64(1), r.GetInt32(2), r.GetInt32(3)));
+        while (await r.ReadAsync()) list.Add(new RankingRow(r.GetInt64(0), r.GetString(1), r.GetInt64(2), r.GetInt32(3), r.GetInt32(4)));
         return list;
     }
 

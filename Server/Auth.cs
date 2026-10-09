@@ -10,7 +10,7 @@ public record GoogleLoginRequest(string? Credential);
 public record Account(long Id, string Name, string? Picture);
 public record AccountStats(long Points, int PlayerKills, int SlimeKills, int Deaths);
 public record AccountData(AccountStats Stats, List<string> Titles, string? NameColor, string? EquippedTitle);
-public record RankingRow(string Name, long Points, int SlimeKills, int PlayerKills);
+public record RankingRow(long AccountId, string Name, long Points, int SlimeKills, int PlayerKills);
 
 public sealed class Sessions
 {

@@ -94,6 +94,7 @@ public class GameHub(IHubContext<GameHub> hubContext, Db db, Sessions sessions) 
             await Clients.Caller.SendAsync("AccountData", new
             {
                 name = account.Name,
+                picture = account.Picture,
                 stats = new { points = data.Stats.Points + pend.Points, playerKills = data.Stats.PlayerKills + pend.PlayerKills, slimeKills = data.Stats.SlimeKills + pend.SlimeKills, deaths = data.Stats.Deaths + pend.Deaths },
                 titles = data.Titles,
                 nameColor = data.NameColor,
@@ -113,7 +114,7 @@ public class GameHub(IHubContext<GameHub> hubContext, Db db, Sessions sessions) 
         {
             await Progress.FlushAsync(); // inclui o que ainda estava na memória
             var top = await db.TopAsync(10);
-            return new { ok = true, rows = top.Select(t => new { name = t.Name, points = t.Points, slimeKills = t.SlimeKills, playerKills = t.PlayerKills }) };
+            return new { ok = true, rows = top.Select(t => new { name = t.Name, points = t.Points, slimeKills = t.SlimeKills, playerKills = t.PlayerKills, me = Players.TryGetValue(Context.ConnectionId, out var self) && self.AccountId == t.AccountId }) };
         }
         catch (Exception) { return new { ok = false, reason = "Não consegui ler o ranking agora." }; }
     }

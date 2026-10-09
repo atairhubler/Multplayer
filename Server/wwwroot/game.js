@@ -1,7 +1,7 @@
 // Páginas em cache: logo depois de uma atualização o navegador pode misturar um index.html antigo com este game.js novo
 // (faltam elementos, o script quebra no meio e o personagem "trava" até apertar F5). Se faltar algum elemento, recarrega uma vez.
 (() => {
-  const need = ['join', 'googleBtn', 'accountBox', 'accountName', 'logoutBtn', 'minimap', 'dashBtn', 'stick', 'stickKnob', 'fsBtn', 'fsBtnDesk', 'chat', 'online', 'sfxBtn', 'helpBtn', 'helpModal', 'moveHint', 'arenaRank', 'arenaBar', 'arenaMsg', 'arenaWeapons', 'attackBtn'];
+  const need = ['join', 'menuBtn', 'menuList', 'infoModal', 'infoBody', 'googleBtn', 'accountBox', 'accountName', 'logoutBtn', 'minimap', 'dashBtn', 'stick', 'stickKnob', 'fsBtn', 'fsBtnDesk', 'chat', 'online', 'sfxBtn', 'helpBtn', 'helpModal', 'moveHint', 'arenaRank', 'arenaBar', 'arenaMsg', 'arenaWeapons', 'attackBtn'];
   let missing = need.some(id => !document.getElementById(id));
   try {
     if (!missing) { sessionStorage.removeItem('staleReload'); return; }
@@ -1580,6 +1580,7 @@ function equipTitle(t) {
 }
 // Dados salvos na conta Google: títulos (somados aos do navegador), cor do nome e título equipado
 function onAccountData(d) {
+  accountInfo = { name: d.name, picture: d.picture || null };
   const merged = [...new Set([...getTitles(), ...(d.titles || [])])];
   try { localStorage.setItem('titles', JSON.stringify(merged)); } catch {}
   if (d.nameColor && /^#[0-9a-f]{6}$/i.test(d.nameColor)) { localInfo.nameColor = d.nameColor; cName.value = d.nameColor; saveProfile(); }
@@ -1708,10 +1709,10 @@ const HELP = {
   ],
   titulo: null,
   perfil: [
-    '🧾 Perfil: digite /perfil para ver seus pontos de combate, slimes e jogadores derrotados, derrotas e títulos. Precisa ter entrado com o Google; tudo é salvo na sua conta e continua valendo em qualquer aparelho.',
+    '🧾 Perfil: clique em ☰ (canto superior direito) → Perfil, ou digite /perfil, para ver seus pontos de combate, slimes e jogadores derrotados, derrotas e títulos. Precisa ter entrado com o Google; tudo é salvo na sua conta e continua valendo em qualquer aparelho.',
   ],
   ranking: [
-    '🏆 Ranking: digite /ranking para ver os 10 que mais pontuaram no combate (arena e floresta) em todos os tempos, entre quem entra com o Google.',
+    '🏆 Ranking: clique em ☰ (canto superior direito) → Ranking, ou digite /ranking, para ver os 10 que mais pontuaram no combate (arena e floresta) em todos os tempos, entre quem entra com o Google.',
   ],
   cor: [
     '🎨 Cor do nome: digite /cor seguido de um código de cor, por exemplo /cor #ff8800. Você também escolhe na tela de entrada.',
@@ -1815,20 +1816,80 @@ function runCommand(text) {
   say([`Comando desconhecido: /${raw}. Digite /comandos para ver a lista.`]);
 }
 
+// ---- Menu (☰, canto superior direito): Ranking e Perfil abrem janelas próprias ----
+const infoModal = document.getElementById('infoModal'), infoTitle = document.getElementById('infoTitle'), infoBody = document.getElementById('infoBody');
+const menuList = document.getElementById('menuList');
+let accountInfo = null; // vindo do servidor (AccountData): nome, foto, estatísticas
+
+function openInfo(title) {
+  infoTitle.textContent = title;
+  infoBody.replaceChildren();
+  infoModal.hidden = false;
+  menuList.hidden = true;
+  return infoBody;
+}
+const closeInfo = () => { infoModal.hidden = true; };
+document.getElementById('infoClose').addEventListener('click', closeInfo);
+infoModal.addEventListener('click', e => { if (e.target === infoModal) closeInfo(); });
+window.addEventListener('keydown', e => { if (e.key === 'Escape' && !infoModal.hidden) closeInfo(); });
+document.getElementById('menuBtn').addEventListener('click', e => { e.stopPropagation(); menuList.hidden = !menuList.hidden; });
+document.addEventListener('click', e => { if (!menuList.hidden && !menuList.contains(e.target)) menuList.hidden = true; });
+menuList.addEventListener('click', e => {
+  const item = e.target.closest('[data-menu]');
+  if (!item) return;
+  if (item.dataset.menu === 'ranking') showRanking(); else showProfile();
+});
+
+const el = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; }; // sempre textContent
+
 function showRanking() {
+  const body = openInfo('🏆 Ranking de combate');
+  body.append(el('p', 'Carregando...', 'note'));
   connection.invoke('GetRanking').then(r => {
-    if (!r?.ok) return say([r?.reason || 'Não consegui ler o ranking agora.']);
-    if (!r.rows.length) return say(['🏆 Ainda ninguém pontuou no combate. Vá à arena ou à floresta!']);
-    say(['🏆 Ranking de combate (todos os tempos):', ...r.rows.map((x, i) => `${i + 1}º ${x.name} — ${x.points} pts · ${x.slimeKills} slimes · ${x.playerKills} jogadores`)]);
-  }).catch(() => say(['O servidor ainda não tem o ranking (ele pode estar atualizando). Tente de novo em alguns minutos.']));
+    body.replaceChildren();
+    if (!r?.ok) { body.append(el('p', r?.reason || 'Não consegui ler o ranking agora.', 'note')); return; }
+    if (!r.rows.length) { body.append(el('p', 'Ainda ninguém pontuou no combate. Vá à arena ou à floresta!', 'note')); return; }
+    const table = el('table'); table.id = 'rankTable';
+    const head = el('tr');
+    [['#', ''], ['Jogador', ''], ['Pontos', 'num'], ['Slimes', 'num'], ['Jogadores', 'num']].forEach(([t, c]) => head.append(el('th', t, c)));
+    table.append(head);
+    const medals = ['🥇', '🥈', '🥉'];
+    r.rows.forEach((x, i) => {
+      const tr = el('tr', undefined, x.me ? 'me' : '');
+      tr.append(el('td', medals[i] || String(i + 1)), el('td', x.name), el('td', String(x.points), 'num'), el('td', String(x.slimeKills), 'num'), el('td', String(x.playerKills), 'num'));
+      table.append(tr);
+    });
+    body.append(table, el('p', 'Pontos: +1 por golpe que acerta, +10 por jogador derrotado e +5 × o tamanho por slime derrotado. Só aparece quem entrou com o Google.', 'note'));
+  }).catch(() => { body.replaceChildren(el('p', 'O servidor ainda não tem o ranking (ele pode estar atualizando). Tente de novo em alguns minutos.', 'note')); });
 }
 
 function showProfile() {
+  const body = openInfo('🧾 Perfil');
+  if (!sessionToken) {
+    body.append(el('p', 'Você está jogando sem conta. Entre com o Google na tela inicial para salvar seus pontos, títulos e a cor do nome, e para aparecer no ranking.', 'note'));
+    return;
+  }
+  body.append(el('p', 'Carregando...', 'note'));
   connection.invoke('GetMyStats').then(r => {
-    if (!r?.ok) return say([r?.reason || 'Não consegui ler o perfil agora.']);
-    say(['🧾 Seu perfil:', `⭐ ${r.points} pontos de combate`, `🟢 ${r.slimeKills} slimes derrotados · ⚔️ ${r.playerKills} jogadores derrotados · 💀 ${r.deaths} derrotas`,
-      r.titles.length ? '🏷️ Títulos: ' + r.titles.join(', ') : '🏷️ Nenhum título ainda.']);
-  }).catch(() => say(['O servidor ainda não tem o perfil (ele pode estar atualizando). Tente de novo em alguns minutos.']));
+    body.replaceChildren();
+    if (!r?.ok) { body.append(el('p', r?.reason || 'Não consegui ler o perfil agora.', 'note')); return; }
+    const head = el('div', undefined, 'profileHead');
+    if (accountInfo?.picture && /^https:\/\//.test(accountInfo.picture)) {
+      const img = el('img'); img.src = accountInfo.picture; img.alt = ''; img.referrerPolicy = 'no-referrer'; head.append(img);
+    }
+    const who = el('div'); who.append(el('div', accountInfo?.name || accountName || myName, 'pname'), el('div', localInfo.title ? '🏷️ ' + localInfo.title : 'Sem título equipado', 'note'));
+    head.append(who);
+    const grid = el('div', undefined, 'statGrid');
+    [['⭐ Pontos de combate', r.points], ['🟢 Slimes derrotados', r.slimeKills], ['⚔️ Jogadores derrotados', r.playerKills], ['💀 Derrotas', r.deaths]].forEach(([label, v]) => {
+      const box = el('div'); box.append(el('b', String(v)), el('span', label)); grid.append(box);
+    });
+    const titles = el('div', undefined, 'badges');
+    if (r.titles.length) r.titles.forEach(t => titles.append(el('span', t, 'badge' + (t === localInfo.title ? ' on' : ''))));
+    else titles.append(el('span', 'Nenhum título ainda. Vença o pique-pega, cumprimente 5 vezes ou dance por 90 segundos.', 'note'));
+    const out = el('button', 'Sair da conta'); out.id = 'profileLogout';
+    out.addEventListener('click', () => { clearAccount(); location.reload(); });
+    body.append(head, grid, el('b', '🏷️ Títulos'), titles, el('p', 'Seu progresso é salvo automaticamente nesta conta.', 'note'), out);
+  }).catch(() => { body.replaceChildren(el('p', 'O servidor ainda não tem o perfil (ele pode estar atualizando). Tente de novo em alguns minutos.', 'note')); });
 }
 
 function titleCommand(args) {
@@ -1861,7 +1922,7 @@ function colorCommand(arg) {
 // ---- Atalhos de teclado (PC) e botões na bandeja (celular) ----
 const KEY_ACTIONS = { h: doGreet, q: doPush, r: doRide, g: doDance, e: doInteract };
 window.addEventListener('keydown', e => {
-  if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || !chatReady || !chatBar.hidden || !helpModal.hidden || currentMap === 'arena') return;
+  if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || !chatReady || !chatBar.hidden || !helpModal.hidden || !infoModal.hidden || currentMap === 'arena') return;
   KEY_ACTIONS[e.key.toLowerCase()]?.();
 });
 [['🤝', 'Cumprimentar', doGreet], ['💢', 'Empurrar', doPush], ['🐴', 'Subir ou descer das costas', doRide],
@@ -2448,7 +2509,7 @@ function applyMap(map) {
   document.getElementById('minimap').hidden = map !== 'forest';
   for (const id in remotePlayers) syncVisibility(id);
   for (const id in bubbles) { bubbles[id].text.destroy(); delete bubbles[id]; }
-  helpModal.hidden = true;
+  helpModal.hidden = true; infoModal.hidden = true;
   refreshHelpForMap();
   updateArenaHud();
   hideMoveHint();
@@ -2633,7 +2694,7 @@ WEAPONS.forEach((w, i) => {
 document.getElementById('attackBtn').addEventListener('pointerdown', e => { e.preventDefault(); doAttack(); });
 document.getElementById('dashBtn').addEventListener('pointerdown', e => { e.preventDefault(); touch.dashReq = true; }); // 💨 dash no celular
 window.addEventListener('keydown', e => {
-  if (!isCombat() || e.ctrlKey || e.metaKey || e.altKey || !chatReady || !chatBar.hidden || !helpModal.hidden) return;
+  if (!isCombat() || e.ctrlKey || e.metaKey || e.altKey || !chatReady || !chatBar.hidden || !helpModal.hidden || !infoModal.hidden) return;
   if (e.code === 'Space' || e.key.toLowerCase() === 'x') { e.preventDefault(); doAttack(); }
   else if (!e.repeat && e.key >= '1' && e.key <= String(WEAPONS.length)) selectWeapon(Number(e.key) - 1);
 });
