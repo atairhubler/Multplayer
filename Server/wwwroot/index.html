@@ -34,9 +34,11 @@
     #chatLog p { margin: 0 0 6px; word-wrap: break-word; overflow-wrap: anywhere; }
     #chatLog .who { font-weight: bold; color: #7fd1ff; }
     #chatLog .sys { color: #999; font-style: italic; }
-    #chatForm { display: flex; gap: 6px; padding: 8px; border-top: 1px solid #333; }
-    #chatForm input { flex: 1; min-width: 0; padding: 8px; font-size: 16px; }
-    #chatForm button { width: auto; padding: 8px 12px; font-size: 14px; }
+    #chatBar { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); width: min(560px, 92vw); z-index: 8; }
+    #chatBar[hidden] { display: none; }
+    #chatBar input { width: 100%; box-sizing: border-box; padding: 12px 14px; font-size: 16px; border: 2px solid #fff;
+      border-radius: 8px; background: #000c; color: #fff; outline: none; user-select: text; -webkit-user-select: text; }
+    #talkBtn { width: 56px !important; height: 56px !important; font-size: 24px !important; align-self: flex-end; }
     #chatOpen { display: none; position: fixed; top: 10px; left: 10px; z-index: 6; width: auto; padding: 6px 10px; font-size: 18px; }
     #chatOpen.show { display: block; }
     @media (max-width: 900px) {
@@ -75,15 +77,15 @@
   <aside id="chat">
     <div id="chatHead"><span>Chat</span><button id="chatClose" title="Recolher">◀</button></div>
     <div id="chatLog"></div>
-    <form id="chatForm" autocomplete="off">
-      <input id="chatInput" type="text" maxlength="200" placeholder="Digite e Enter...">
-      <button type="submit">Enviar</button>
-    </form>
   </aside>
+  <form id="chatBar" autocomplete="off" hidden>
+    <input id="chatInput" type="text" maxlength="200" enterkeyhint="send" placeholder="Digite sua mensagem e pressione Enter (Esc cancela)">
+  </form>
   <button id="chatOpen" title="Abrir chat">💬</button>
   <div id="game"></div>
   <div id="touch">
     <div class="grp"><button data-key="left">◀</button><button data-key="right">▶</button></div>
+    <button id="talkBtn" title="Falar">💬</button>
     <div class="grp"><button data-key="jump">▲</button></div>
   </div>
 

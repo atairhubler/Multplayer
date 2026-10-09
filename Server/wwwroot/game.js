@@ -218,7 +218,7 @@ function create() {
 
 function update(time) {
   const body = player.body;
-  const typing = document.activeElement === document.getElementById('chatInput');
+  const typing = document.activeElement === chatInput;
   const left = (!typing && cursors.left.isDown) || touch.left;
   const right = (!typing && cursors.right.isDown) || touch.right;
   const jump = (!typing && cursors.up.isDown) || touch.jump;
@@ -251,7 +251,7 @@ function update(time) {
 
 // ---- Controles de toque (celular) ----
 const touch = { left: false, right: false, jump: false };
-document.querySelectorAll('#touch button').forEach(btn => {
+document.querySelectorAll('#touch button[data-key]').forEach(btn => {
   const key = btn.dataset.key;
   const set = v => e => { e.preventDefault(); touch[key] = v; };
   btn.addEventListener('pointerdown', set(true));
@@ -299,11 +299,39 @@ function setupChat() {
   connection.on('ChatHistory', list => list.forEach(m => addChatLine(m.name, m.text)));
   connection.on('ChatMessage', m => { addChatLine(m.name, m.text); showBubble(m.id, m.text); });
 
-  document.getElementById('chatForm').onsubmit = e => {
-    e.preventDefault();
-    const input = document.getElementById('chatInput');
-    const text = input.value.trim();
-    if (text) connection.invoke('SendMessage', text);
-    input.value = '';
-  };
+  chatReady = true;
 }
+
+// Enter abre a caixa de mensagem na parte inferior; Enter de novo envia e fecha; Esc cancela
+const chatBar = document.getElementById('chatBar');
+const chatInput = document.getElementById('chatInput');
+let chatReady = false;
+
+function openChatBar() {
+  chatBar.hidden = false;
+  chatInput.focus();
+}
+
+function closeChatBar() {
+  chatBar.hidden = true;
+  chatInput.value = '';
+  chatInput.blur(); // devolve o controle ao teclado do jogo
+}
+
+window.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && chatReady && chatBar.hidden) {
+    e.preventDefault();
+    openChatBar();
+  }
+});
+chatInput.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeChatBar();
+});
+chatInput.addEventListener('blur', () => { if (!chatBar.hidden) closeChatBar(); });
+chatBar.addEventListener('submit', e => {
+  e.preventDefault();
+  const text = chatInput.value.trim();
+  if (text) connection.invoke('SendMessage', text);
+  closeChatBar();
+});
+document.getElementById('talkBtn').addEventListener('click', () => { if (chatReady) openChatBar(); });
