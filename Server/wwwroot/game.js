@@ -162,7 +162,7 @@ function startPhaser() {
     backgroundColor: '#87ceeb',
     physics: { default: 'arcade', arcade: { gravity: { y: 800 }, debug: false } },
     scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
-    scene: { create, update }
+    scene: { preload, create, update }
   });
 }
 
@@ -255,20 +255,48 @@ function updateBubbles(now) {
   }
 }
 
+// ---- Fundo que muda conforme a hora do dia (relógio do aparelho de cada jogador) ----
+// 10h–14h59 usa a imagem das 10h, 15h–17h59 a das 15h, e das 18h às 9h59 a das 18h.
+const BACKGROUNDS = { 10: 'assets/fundo_10h.jpg', 15: 'assets/fundo_15h.jpg', 18: 'assets/fundo_18h.jpg' };
+const backgroundForHour = h => (h >= 18 || h < 10 ? 18 : h >= 15 ? 15 : 10);
+let background, backgroundPeriod, lastBackgroundCheck = 0;
+
+function preload() {
+  backgroundPeriod = backgroundForHour(new Date().getHours());
+  this.load.image('bg' + backgroundPeriod, BACKGROUNDS[backgroundPeriod]);
+}
+
+function updateBackground(scene, time) {
+  if (time - lastBackgroundCheck < 5000) return; // confere a cada 5 s
+  lastBackgroundCheck = time;
+  const period = backgroundForHour(new Date().getHours());
+  if (period === backgroundPeriod) return;
+  backgroundPeriod = period;
+  const key = 'bg' + period;
+  const apply = () => { if (backgroundPeriod === period) background.setTexture(key).setDisplaySize(WORLD_W, VIEW_H); };
+  if (scene.textures.exists(key)) apply();
+  else { // carrega a imagem só quando for preciso
+    scene.load.image(key, BACKGROUNDS[period]);
+    scene.load.once('complete', apply);
+    scene.load.start();
+  }
+}
+
 function create() {
   const scene = this;
   gameScene = this;
 
   createColorTextures(this);
+  background = this.add.image(0, 0, 'bg' + backgroundPeriod).setOrigin(0).setDisplaySize(WORLD_W, VIEW_H).setDepth(-10);
 
   // Mapa: chão + 3 plataformas (retângulos estáticos)
   const platforms = this.physics.add.staticGroup();
   const addPlatform = (x, y, w, h, color) => {
-    const r = this.add.rectangle(x, y, w, h, color);
+    const r = this.add.rectangle(x, y, w, h, color ?? 0).setVisible(color !== null);
     this.physics.add.existing(r, true);
     platforms.add(r);
   };
-  addPlatform(WORLD_W / 2, 580, WORLD_W, 40, 0x228b22); // chão
+  addPlatform(WORLD_W / 2, 580, WORLD_W, 40, null); // chão invisível (o chão visível é a rua do fundo)
   addPlatform(200, 450, 200, 20, 0x8b5a2b);
   addPlatform(520, 340, 200, 20, 0x8b5a2b);
   addPlatform(150, 220, 160, 20, 0x8b5a2b);
@@ -351,6 +379,7 @@ function update(time, delta) {
   }
   updateGifs();
   positionChat();
+  updateBackground(this, time);
 }
 
 // ---- Controles de toque (celular) ----
