@@ -143,6 +143,9 @@
     #touch button { pointer-events: auto; width: 76px; height: 76px; border-radius: 50%; border: 2px solid #fff8;
       background: #0006; color: #fff; font-size: 30px; touch-action: none; }
     #touch button:active { background: #fff5; }
+    /* botões do celular 80% transparentes (20% visíveis) para não atrapalhar a tela; ao tocar ficam mais visíveis */
+    #touch button { opacity: .2; transition: opacity .1s; }
+    #touch button:active { opacity: .55; }
   </style>
 </head>
 <body>
