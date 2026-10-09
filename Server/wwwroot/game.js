@@ -232,14 +232,37 @@ function createColorTextures(scene) {
   g.destroy();
 }
 
+const LABEL_STYLE = { fontSize: '14px', color: '#ffffff', stroke: '#000', strokeThickness: 3, align: 'center' };
+const myId = () => connection?.connectionId;
+const localInfo = { label: null, name: '', title: null, nameColor: '#ffffff' };
+const ridingMap = {}; // id de quem está montado -> id de quem carrega
+// quem está carregando alguém tem o nome e o balão mais acima, para não ficarem por cima de quem está nas costas
+const liftFor = id => (Object.values(ridingMap).includes(id) ? CHAR_H * 0.72 + 34 : 0);
+
+const isIt = id => tagState.active && tagState.itId === id;
+
+// Nome (com o título numa linha acima), na cor escolhida; o pegador do pique-pega aparece em vermelho
+function refreshLabel(id) {
+  const info = id === myId() ? localInfo : remotePlayers[id];
+  if (!info || !info.label) return;
+  const it = isIt(id);
+  info.label.setText((it ? '🔴 ' : '') + (info.title ? info.title + '\n' : '') + info.name);
+  info.label.setColor(it ? '#ff6b6b' : info.nameColor || '#ffffff');
+}
+const refreshAllLabels = () => { refreshLabel(myId()); Object.keys(remotePlayers).forEach(refreshLabel); };
+const placeLabel = (label, x, y) => label.setPosition(x, y - LABEL_DY + 9);
+
 function createRemote(scene, p, announce = false) {
   if (remotePlayers[p.id]) return;
   const rect = makeSprite(scene, p.characterSprite || 'red').setPosition(p.x, p.y);
-  if (announce) addChatLine(null, p.name + ' entrou');
-  const label = scene.add.text(p.x, p.y - LABEL_DY, p.name, {
-    fontSize: '14px', color: '#fff', stroke: '#000', strokeThickness: 3
-  }).setOrigin(0.5);
-  remotePlayers[p.id] = { rect, label, name: p.name, targetX: p.x, targetY: p.y };
+  if (announce) { addChatLine(null, p.name + ' entrou'); playChime(); }
+  const label = scene.add.text(p.x, p.y, p.name, LABEL_STYLE).setOrigin(0.5, 1);
+  remotePlayers[p.id] = {
+    rect, label, name: p.name, title: p.title || null, nameColor: p.nameColor || null,
+    dancing: !!p.dancing, targetX: p.x, targetY: p.y,
+  };
+  if (p.ridingOn) { ridingMap[p.id] = p.ridingOn; rect.setDepth(2); }
+  refreshLabel(p.id);
   renderOnline();
 }
 
@@ -260,10 +283,10 @@ function showBubble(id, message) {
 function updateBubbles(now) {
   for (const id in bubbles) {
     const b = bubbles[id];
-    const anchor = id === connection.connectionId ? player : remotePlayers[id]?.rect;
+    const anchor = id === connection.connectionId ? localSprite : remotePlayers[id]?.rect;
     if (!anchor || now > b.expires) { b.text.destroy(); delete bubbles[id]; continue; }
     const half = b.text.width / 2;
-    b.text.setPosition(Phaser.Math.Clamp(anchor.x, half, WORLD_W - half), anchor.y - BUBBLE_DY);
+    b.text.setPosition(Phaser.Math.Clamp(anchor.x, half, WORLD_W - half), anchor.y - BUBBLE_DY - liftFor(id));
   }
 }
 
@@ -318,9 +341,9 @@ function create() {
   player.x = 100; player.y = 400;
   player.body.setCollideWorldBounds(true);
   this.physics.add.collider(player, platforms);
-  nameLabel = this.add.text(0, 0, myName, {
-    fontSize: '14px', color: '#fff', stroke: '#000', strokeThickness: 3
-  }).setOrigin(0.5);
+  nameLabel = this.add.text(0, 0, myName, LABEL_STYLE).setOrigin(0.5, 1);
+  Object.assign(localInfo, { label: nameLabel, name: myName, nameColor: cName.value, title: equippedTitle() });
+  refreshLabel(myId());
 
   this.physics.world.setBounds(0, 0, WORLD_W, VIEW_H);
 
@@ -335,7 +358,22 @@ function create() {
     const r = remotePlayers[id];
     if (r) { r.targetX = x; r.targetY = y; }
   });
-  connection.on('PlayerEmote', (id, i) => showEmote(id, EMOTES[i]));
+  connection.on('PlayerEmote', (id, i) => showEmote(id, EMOTE_ICONS[i]));
+  connection.on('SystemMessage', text => String(text).split('\n').forEach(l => addChatLine(null, l)));
+  connection.on('PlayerProfile', (id, nameColor, title) => {
+    const r = remotePlayers[id];
+    if (!r) return;
+    r.nameColor = nameColor; r.title = title;
+    refreshLabel(id);
+  });
+  connection.on('Pushed', dir => { pushVX = dir * 520; pushUntil = gameScene.time.now + PUSH_MS; player.body.setVelocityY(-260); });
+  connection.on('Riding', onRiding);
+  connection.on('PlayerDance', (id, on) => {
+    if (id === myId()) localDancing = on;
+    else if (remotePlayers[id]) remotePlayers[id].dancing = on;
+  });
+  connection.on('TagState', onTagState);
+  connection.on('TitleEarned', onTitleEarned);
   connection.on('PlayerLeft', id => {
     const r = remotePlayers[id];
     if (!r) return;
@@ -343,10 +381,13 @@ function create() {
     r.rect.destroy();
     r.label.destroy();
     delete remotePlayers[id];
+    delete ridingMap[id];
     renderOnline();
   });
 
   connection.invoke('JoinGame', myName, myCharacter);
+  // cor do nome e título (se o servidor for antigo e não tiver o método, ignora o erro)
+  connection.invoke('UpdateProfile', localInfo.nameColor, localInfo.title).catch(() => {});
 }
 
 function update(time, delta) {
@@ -355,21 +396,36 @@ function update(time, delta) {
   const left = (!typing && cursors.left.isDown) || touch.left;
   const right = (!typing && cursors.right.isDown) || touch.right;
   const jump = (!typing && cursors.up.isDown) || touch.jump;
-  if (left) body.setVelocityX(-200);
-  else if (right) body.setVelocityX(200);
-  else body.setVelocityX(0);
+  const carrierId = ridingMap[myId()];
+  const carrier = carrierId && remotePlayers[carrierId];
 
-  if (jump && body.blocked.down) body.setVelocityY(-500);
+  if (carrier) { // nas costas de alguém: acompanha o carregador; pular desce
+    player.setPosition(carrier.rect.x, carrier.rect.y);
+    if (jump && !jumpLatch) doRide();
+  } else {
+    if (time < pushUntil) body.setVelocityX(pushVX * (pushUntil - time) / PUSH_MS); // empurrão que vai perdendo força
+    else if (left) body.setVelocityX(-200);
+    else if (right) body.setVelocityX(200);
+    else body.setVelocityX(0);
 
-  localSprite.setPosition(player.x, player.y);
-  if (localSprite.animate) {
-    const vx = body.velocity.x;
-    localSprite.animate(Math.abs(vx) > 10, !body.blocked.down, vx, delta);
+    if (jump && body.blocked.down) body.setVelocityY(-500);
+    if (localDancing && (left || right || jump)) setDancing(false); // andar interrompe a dança
   }
-  nameLabel.setPosition(player.x, player.y - LABEL_DY);
+  jumpLatch = jump;
+
+  if (carrier) {
+    localSprite.setPosition(player.x, player.y - CHAR_H * 0.72);
+    localSprite.animate?.(false, false, 0, delta, false);
+  } else {
+    localSprite.setPosition(player.x, player.y);
+    const vx = body.velocity.x;
+    localSprite.animate?.(Math.abs(vx) > 10, !body.blocked.down, vx, delta, localDancing);
+  }
+  if (!localSprite.animate && localSprite.setAngle) localSprite.angle = localDancing ? Math.sin(Date.now() / 150) * 10 : 0;
+  placeLabel(nameLabel, localSprite.x, localSprite.y - liftFor(myId()));
 
   // Envia posição só se mudou, com throttle
-  if (time - lastSent > SEND_INTERVAL_MS &&
+  if (!carrier && time - lastSent > SEND_INTERVAL_MS &&
       (Math.abs(player.x - lastX) > 0.5 || Math.abs(player.y - lastY) > 0.5)) {
     connection.invoke('UpdatePosition', player.x, player.y);
     lastSent = time; lastX = player.x; lastY = player.y;
@@ -377,15 +433,25 @@ function update(time, delta) {
 
   updateBubbles(time);
 
-  // Interpolação suave dos remotos
+  // Remotos: interpolação suave, ou posição presa ao carregador quando estão nas costas de alguém
   for (const id in remotePlayers) {
     const r = remotePlayers[id];
-    const dx = r.targetX - r.rect.x, dy = r.targetY - r.rect.y;
-    r.rect.x = Phaser.Math.Linear(r.rect.x, r.targetX, 0.25);
-    r.rect.y = Phaser.Math.Linear(r.rect.y, r.targetY, 0.25);
-    r.rect.animate?.(Math.abs(dx) > 0.8, Math.abs(dy) > 2, dx, delta);
-    r.label.setPosition(r.rect.x, r.rect.y - LABEL_DY);
+    const cId = ridingMap[id];
+    const src = cId === myId() ? player : remotePlayers[cId]?.rect;
+    if (cId && src) {
+      r.rect.setPosition(src.x, src.y - CHAR_H * 0.72);
+      r.targetX = src.x; r.targetY = src.y;
+      r.rect.animate?.(false, false, 0, delta, false);
+    } else {
+      const dx = r.targetX - r.rect.x, dy = r.targetY - r.rect.y;
+      r.rect.x = Phaser.Math.Linear(r.rect.x, r.targetX, 0.25);
+      r.rect.y = Phaser.Math.Linear(r.rect.y, r.targetY, 0.25);
+      r.rect.animate?.(Math.abs(dx) > 0.8, Math.abs(dy) > 2, dx, delta, r.dancing);
+    }
+    if (!r.rect.animate && r.rect.setAngle) r.rect.angle = r.dancing ? Math.sin(Date.now() / 150) * 10 : 0;
+    placeLabel(r.label, r.rect.x, r.rect.y - liftFor(id));
   }
+  updateInteractHint(carrier);
   updateGifs();
   positionChat();
   updateBackground(this, time);
@@ -436,6 +502,9 @@ function positionChat() {
   onlineEl.style.top = r.top + 8 + 'px';
   onlineEl.style.right = innerWidth - r.right + 8 + 'px';
   emoteTray.style.bottom = innerHeight - r.bottom + 84 + 'px';
+  hudEl.style.left = interactHint.style.left = r.left + r.width / 2 + 'px';
+  hudEl.style.top = r.top + 8 + 'px';
+  interactHint.style.top = r.top + 44 + 'px';
   chatEl.style.left = r.left + 12 + 'px';
   chatEl.style.width = Math.min(coarsePointer ? 250 : 360, r.width * 0.45) + 'px';
   chatLog.style.maxHeight = r.height * (coarsePointer ? 0.4 : 0.5) + 'px'; // até a metade do jogo
@@ -456,6 +525,8 @@ function setupChat() {
   connection.on('ChatHistory', list => list.forEach(m => addChatLine(m.name, m.text)));
   connection.on('ChatMessage', m => { addChatLine(m.name, m.text); showBubble(m.id, m.text); });
   chatReady = true;
+  // depois do histórico, que chega logo ao entrar
+  setTimeout(() => addChatLine(null, `👋 Bem-vindo, ${myName}! Digite /comandos para ver tudo que você pode fazer.`), 700);
 }
 
 // Enter abre a caixa de mensagem na parte inferior; Enter de novo envia e fecha; Esc cancela
@@ -490,7 +561,10 @@ chatInput.addEventListener('blur', () => { if (!chatBar.hidden) closeChatBar(); 
 chatBar.addEventListener('submit', e => {
   e.preventDefault();
   const text = chatInput.value.trim();
-  if (text) connection.invoke('SendMessage', text);
+  if (text) {
+    if (text.startsWith('/')) runCommand(text);
+    else connection.invoke('SendMessage', text);
+  }
   closeChatBar();
 });
 document.getElementById('talkBtn').addEventListener('click', () => { if (chatReady) openChatBar(); });
@@ -601,11 +675,20 @@ function createDoll(scene, config) {
   const doll = scene.add.container(0, 0, [rig]).setScale(CHAR_SCALE);
   let phase = 0, dir = 1;
 
-  doll.animate = (moving, air, vx, dt = 16) => {
+  doll.animate = (moving, air, vx, dt = 16, dancing = false) => {
     if (Math.abs(vx) > 0.5) dir = vx > 0 ? 1 : -1;
     doll.scaleX = dir * CHAR_SCALE;
     let aN = 0, aF = 0, lN = 0, lF = 0, bob = 0;
-    if (air) { lN = -0.7; lF = 0.5; aN = -2.3; aF = -1.9; }
+    let sway = 0;
+    if (dancing) { // a fase vem do relógio, então todo mundo que dança fica em sincronia
+      const ph = Date.now() / 1000 * Math.PI * 2 * 1.6;
+      dir = Math.floor(Date.now() / 2500) % 2 ? 1 : -1;
+      doll.scaleX = dir * CHAR_SCALE;
+      aN = -2.3 + Math.sin(ph) * 0.6; aF = -2.3 - Math.sin(ph) * 0.6;
+      lN = Math.sin(ph) * 0.5; lF = -Math.sin(ph) * 0.5;
+      bob = -Math.abs(Math.sin(ph)) * 3.5; sway = Math.sin(ph / 2) * 0.1;
+    }
+    else if (air) { lN = -0.7; lF = 0.5; aN = -2.3; aF = -1.9; }
     else if (moving) {
       phase += dt * 0.014;
       const sw = Math.sin(phase);
@@ -619,6 +702,7 @@ function createDoll(scene, config) {
     ease(part.armNear, aN); ease(part.armFar, aF);
     ease(part.legNear, lN); ease(part.legFar, lF);
     rig.y += (bob - rig.y) * k;
+    rig.rotation += (sway - rig.rotation) * k;
   };
   return doll;
 }
@@ -631,7 +715,7 @@ function saveProfile() {
     const gender = document.querySelector('input[name=gender]:checked').value;
     localStorage.setItem('profile', JSON.stringify({
       name: myName === 'Jogador' && !document.getElementById('name').value.trim() ? '' : myName,
-      gender, hair: cHair.value, skin: cSkin.value, cloth: cCloth.value,
+      gender, hair: cHair.value, skin: cSkin.value, cloth: cCloth.value, nameColor: cName.value,
       image: customImage && !customImage.startsWith('data:image/gif') ? customImage : null,
     }));
   } catch {}
@@ -648,6 +732,7 @@ function restoreProfile() {
     cHair.value = hex(p.hair) || cHair.value;
     cSkin.value = hex(p.skin) || cSkin.value;
     cCloth.value = hex(p.cloth) || cCloth.value;
+    cName.value = hex(p.nameColor) || cName.value;
     if (typeof p.image === 'string' && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(p.image) && p.image.length <= MAX_IMAGE_CHARS) {
       customImage = p.image;
       preview.src = customImage;
@@ -657,6 +742,7 @@ function restoreProfile() {
   } catch {}
 }
 const cHair = document.getElementById('cHair'), cSkin = document.getElementById('cSkin'), cCloth = document.getElementById('cCloth');
+const cName = document.getElementById('cName');
 restoreProfile();
 drawDollPreview(document.getElementById('dollPreview'), currentDollConfig());
 
@@ -732,6 +818,9 @@ function unlockAudio() {
       music.master = ctx.createGain();
       music.master.gain.value = music.muted ? 0 : MUSIC_VOLUME;
       music.master.connect(ctx.destination);
+      music.sfx = ctx.createGain(); // efeitos sonoros (volume próprio)
+      music.sfx.gain.value = music.muted ? 0 : 0.5;
+      music.sfx.connect(ctx.destination);
       // eco suave para dar ambiente
       const delay = ctx.createDelay(1), feedback = ctx.createGain(), wet = ctx.createGain();
       delay.delayTime.value = 0.42; feedback.gain.value = 0.35; wet.gain.value = 0.35;
@@ -787,4 +876,216 @@ muteBtn.addEventListener('click', () => {
   try { localStorage.setItem('muted', music.muted ? '1' : '0'); } catch {}
   unlockAudio();
   if (music.master) music.master.gain.setTargetAtTime(music.muted ? 0 : MUSIC_VOLUME, music.ctx.currentTime, 0.15);
+  if (music.sfx) music.sfx.gain.setTargetAtTime(music.muted ? 0 : 0.5, music.ctx.currentTime, 0.15);
+});
+
+// ======================= Ações sociais, comandos, pique-pega e títulos =======================
+const EMOTE_ICONS = { ...EMOTES, 6: '🖐️', 7: '🤝', 8: '💢', 9: '🎵', 20: '💧', 21: '🍞', 22: '🔨', 23: '🍎', 24: '🧀', 25: '🍅', 26: '🚪' };
+
+let localDancing = false, jumpLatch = false, pushVX = 0, pushUntil = 0;
+const PUSH_MS = 350;
+let tagState = { active: false }, tagEndsAt = 0;
+const hudEl = document.getElementById('hud');
+const interactHint = document.getElementById('interactHint');
+
+// Pontos do vilarejo (x no mundo de 1280 de largura). A ordem é a mesma do servidor.
+const SPOTS = [
+  { x: 798, range: 110, text: 'Beber água na fonte' },
+  { x: 1220, range: 70, text: 'Comprar pão na padaria' },
+  { x: 1041, range: 60, text: 'Bater o martelo na ferraria' },
+  { x: 335, range: 60, text: 'Olhar as frutas da barraca' },
+  { x: 486, range: 55, text: 'Provar o queijo da barraca' },
+  { x: 598, range: 55, text: 'Comprar tomates na barraca' },
+  { x: 122, range: 55, text: 'Bater na porta' },
+];
+let currentSpot = -1;
+
+function updateInteractHint(riding) {
+  const spot = riding ? -1 : SPOTS.findIndex(sp => Math.abs(player.x - sp.x) < sp.range);
+  if (spot === currentSpot) return;
+  currentSpot = spot;
+  interactHint.hidden = spot < 0;
+  if (spot >= 0) interactHint.textContent = (coarsePointer ? '👆 Toque: ' : 'Aperte E: ') + SPOTS[spot].text;
+}
+
+const doGreet = () => connection.invoke('Greet');
+const doPush = () => connection.invoke('Push');
+const doRide = () => connection.invoke('ToggleRide');
+const setDancing = on => { localDancing = on; connection.invoke('SetDancing', on); };
+const doDance = () => { if (!ridingMap[myId()]) setDancing(!localDancing); };
+const doInteract = () => {
+  if (currentSpot >= 0) connection.invoke('Interact', currentSpot);
+  else addChatLine(null, 'Chegue perto de um ponto do vilarejo: a fonte, as barracas, a padaria, a ferraria ou a porta da esquerda.');
+};
+interactHint.addEventListener('click', doInteract);
+
+// Quem sobe/desce das costas de alguém
+function onRiding(rid, cid, x, y) {
+  if (cid) ridingMap[rid] = cid; else delete ridingMap[rid];
+  const me = rid === myId();
+  const sprite = me ? localSprite : remotePlayers[rid]?.rect;
+  sprite?.setDepth(cid ? 2 : 0);
+  if (me) {
+    if (cid) { player.body.enable = false; player.body.setVelocity(0, 0); localDancing = false; }
+    else { player.body.enable = true; player.body.reset(x, y); }
+  } else if (!cid && remotePlayers[rid]) {
+    Object.assign(remotePlayers[rid], { targetX: x, targetY: y });
+  }
+}
+
+// ---- Pique-pega: placar no topo e pegador em vermelho ----
+function onTagState(st) {
+  tagState = st;
+  tagEndsAt = Date.now() + (st.remainingMs || 0);
+  refreshAllLabels();
+  updateHud();
+}
+function updateHud() {
+  if (!tagState.active) { hudEl.hidden = true; return; }
+  const secs = Math.max(0, Math.ceil((tagEndsAt - Date.now()) / 1000));
+  const who = tagState.itId === myId() ? 'VOCÊ É O PEGADOR!' : 'Pegador: ' + tagState.itName;
+  hudEl.textContent = `🏃 Pique-pega · ${who} · ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+  hudEl.hidden = false;
+}
+setInterval(updateHud, 500);
+
+// ---- Títulos (guardados neste navegador) e cor do nome ----
+const getTitles = () => { try { return JSON.parse(localStorage.getItem('titles') || '[]'); } catch { return []; } };
+const equippedTitle = () => { try { const t = localStorage.getItem('title'); return t && getTitles().includes(t) ? t : null; } catch { return null; } };
+function equipTitle(t) {
+  try { t ? localStorage.setItem('title', t) : localStorage.removeItem('title'); } catch {}
+  localInfo.title = t;
+  refreshLabel(myId());
+  connection.invoke('UpdateProfile', localInfo.nameColor, t).catch(() => {});
+}
+function onTitleEarned(t) {
+  try { localStorage.setItem('titles', JSON.stringify([...new Set([...getTitles(), t])])); } catch {}
+  addChatLine(null, `🏆 Você conquistou o título "${t}"! Ele já está equipado. Digite /titulo para ver todos.`);
+  equipTitle(t);
+}
+
+// ---- Aviso sonoro quando um amigo entra ----
+function playChime() {
+  if (!music.ctx || !music.sfx || music.muted || music.ctx.state !== 'running') return;
+  const t0 = music.ctx.currentTime;
+  [[880, 0], [1318.5, 0.14]].forEach(([freq, delay]) => {
+    const osc = music.ctx.createOscillator(), g = music.ctx.createGain();
+    osc.type = 'sine'; osc.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, t0 + delay);
+    g.gain.linearRampToValueAtTime(0.2, t0 + delay + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + delay + 0.7);
+    osc.connect(g); g.connect(music.sfx);
+    osc.start(t0 + delay); osc.stop(t0 + delay + 0.75);
+  });
+}
+
+// ---- Comandos do chat: /comandos e a ajuda de cada um ----
+const HELP = {
+  emote: [
+    '😀 Emotes: aperte as teclas 1 a 6 (👋 😂 ❤️ 👍 😮 😢) e o ícone aparece sobre a sua cabeça para todos.',
+    'No celular, toque no botão 😀. Também funciona digitando /emote 3 (de 1 a 6).',
+  ],
+  cumprimentar: [
+    '🤝 Cumprimentar: chegue perto de um amigo e aperte H (celular: botão 😀 e depois 🤝).',
+    'O amigo também precisa apertar H em até 5 segundos. Cumprimentar 5 vezes dá o título "Cumprimentador".',
+  ],
+  empurrar: [
+    '💢 Empurrar: fique bem ao lado de um amigo e aperte Q (celular: botão 😀 e depois 💢). Ele é jogado para longe.',
+    'Use com carinho! Quem está nas costas de alguém não pode ser empurrado.',
+  ],
+  subir: [
+    '🐴 Subir nas costas: chegue perto de um amigo e aperte R (celular: botão 😀 e depois 🐴). Você vai junto com ele.',
+    'Para descer, aperte R de novo ou pule. Quem está carregando também pode apertar R para derrubar quem está nas costas.',
+  ],
+  danca: [
+    '💃 Dança: aperte G para começar a dançar (celular: botão 😀 e depois 💃). Aperte G de novo ou ande para parar.',
+    'Quando vários amigos dançam juntos a dança fica sincronizada! Dançar por 90 segundos dá o título "Dançarino".',
+  ],
+  pique: [
+    '🏃 Pique-pega: digite /pique iniciar para começar (mínimo de 2 jogadores, dura 90 segundos). /pique parar encerra.',
+    'O pegador fica em vermelho 🔴: encoste em alguém para passar a vez (quem foi pego tem 2 segundos de proteção).',
+    'Vence quem ficar menos tempo como pegador e ganha o título "Campeão do Pique-Pega". Quem está nas costas de alguém não pode ser pego.',
+  ],
+  vilarejo: [
+    '🏘️ Vilarejo: ande até a fonte, as barracas, a padaria, a ferraria ou a porta da esquerda.',
+    'Quando aparecer o aviso no topo da tela, aperte E (celular: toque no aviso) para interagir. Todos veem o que você fez.',
+  ],
+  titulo: null,
+  cor: [
+    '🎨 Cor do nome: digite /cor seguido de um código de cor, por exemplo /cor #ff8800. Você também escolhe na tela de entrada.',
+  ],
+};
+const ALIASES = {
+  ajuda: 'comandos', help: 'comandos', dancar: 'danca', costas: 'subir', montar: 'subir', carregar: 'subir',
+  interagir: 'vilarejo', cumprimento: 'cumprimentar', empurrao: 'empurrar', titulos: 'titulo',
+};
+const say = lines => lines.forEach(l => addChatLine(null, l));
+
+function runCommand(text) {
+  const [raw, ...args] = text.slice(1).trim().split(/\s+/);
+  let cmd = raw.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  cmd = ALIASES[cmd] || cmd;
+
+  if (cmd === 'comandos') {
+    return say([
+      '📜 Comandos (digite cada um para ver como usar):',
+      '/emote — emotes sobre a cabeça',
+      '/cumprimentar — toca aqui com um amigo',
+      '/empurrar — empurrar um amigo',
+      '/subir — subir nas costas de um amigo',
+      '/danca — dançar (em grupo, fica sincronizado)',
+      '/pique — jogo de pique-pega',
+      '/vilarejo — interagir com a fonte, barracas e porta',
+      '/titulo — ver e escolher seus títulos',
+      '/cor — mudar a cor do seu nome',
+    ]);
+  }
+  if (cmd === 'emote' && /^[1-6]$/.test(args[0] || '')) return sendEmote(Number(args[0]) - 1);
+  if (cmd === 'pique' && args[0]?.toLowerCase() === 'iniciar') return connection.invoke('StartTag');
+  if (cmd === 'pique' && args[0]?.toLowerCase() === 'parar') return connection.invoke('StopTag');
+  if (cmd === 'titulo') return titleCommand(args);
+  if (cmd === 'cor' && args[0]) return colorCommand(args[0]);
+  if (HELP[cmd]) return say(HELP[cmd]);
+  say([`Comando desconhecido: /${raw}. Digite /comandos para ver a lista.`]);
+}
+
+function titleCommand(args) {
+  const titles = getTitles();
+  if (!args.length) {
+    if (!titles.length) {
+      return say(['🏷️ Você ainda não tem títulos.', 'Conquiste jogando: vença o pique-pega, cumprimente 5 vezes ou dance por 90 segundos.']);
+    }
+    return say(['🏷️ Seus títulos:', ...titles.map((t, i) => `${i + 1}) ${t}${t === localInfo.title ? ' (equipado)' : ''}`),
+      'Use /titulo 1 para equipar o primeiro, ou /titulo nenhum para tirar.']);
+  }
+  if (args[0].toLowerCase() === 'nenhum') { equipTitle(null); return say(['Título removido.']); }
+  const t = titles[Number(args[0]) - 1];
+  if (!t) return say(['Título não encontrado. Digite /titulo para ver a lista.']);
+  equipTitle(t);
+  say([`🏷️ Título "${t}" equipado!`]);
+}
+
+function colorCommand(arg) {
+  const hex = (arg.startsWith('#') ? arg : '#' + arg).toLowerCase();
+  if (!/^#[0-9a-f]{6}$/.test(hex)) return say(['Cor inválida. Use um código como /cor #ff8800 (6 dígitos, de 0 a 9 e a a f).']);
+  localInfo.nameColor = hex;
+  cName.value = hex;
+  saveProfile();
+  refreshLabel(myId());
+  connection.invoke('UpdateProfile', hex, localInfo.title).catch(() => {});
+  say(['🎨 Cor do nome alterada!']);
+}
+
+// ---- Atalhos de teclado (PC) e botões na bandeja (celular) ----
+const KEY_ACTIONS = { h: doGreet, q: doPush, r: doRide, g: doDance, e: doInteract };
+window.addEventListener('keydown', e => {
+  if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || !chatReady || !chatBar.hidden) return;
+  KEY_ACTIONS[e.key.toLowerCase()]?.();
+});
+[['🤝', 'Cumprimentar', doGreet], ['💢', 'Empurrar', doPush], ['🐴', 'Subir ou descer das costas', doRide],
+ ['💃', 'Dançar', doDance], ['✋', 'Interagir', doInteract]].forEach(([icon, title, fn]) => {
+  const b = document.createElement('button');
+  b.textContent = icon; b.title = title;
+  b.addEventListener('click', () => { fn(); emoteTray.classList.remove('open'); });
+  emoteTray.appendChild(b);
 });

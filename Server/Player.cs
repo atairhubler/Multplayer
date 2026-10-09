@@ -5,4 +5,10 @@ public class Player
     public string CharacterSprite { get; set; } = "";
     public float X { get; set; }
     public float Y { get; set; }
+
+    // Personalização e estado social (tudo só em memória, enquanto o jogador está conectado)
+    public string? NameColor { get; set; }   // "#rrggbb"
+    public string? Title { get; set; }       // um dos títulos permitidos
+    public bool Dancing { get; set; }
+    public string? RidingOn { get; set; }    // id de quem está carregando este jogador
 }
