@@ -450,6 +450,7 @@ async function showShop() {
 // ----- Inventário (mochila) -----
 let selectedItem = null;
 function showInventory(select) {
+  if (potionWindow !== 'inventory') selectedItem = null; // ao abrir de novo, nenhum item vem selecionado
   const body = openScreen('Inventário', 'bag');
   potionWindow = 'inventory';
   if (typeof select === 'string') selectedItem = select;
@@ -464,15 +465,16 @@ function showInventory(select) {
     const go = uiEl('button', 'Ir para a Loja', 'wide'); go.addEventListener('click', showShop); wrap.append(go);
     return;
   }
-  if (!selectedItem || !(ownedItems()[selectedItem] > 0)) selectedItem = owned[0][0];
+  if (selectedItem && !(ownedItems()[selectedItem] > 0)) selectedItem = null;
   for (const [kind, qty] of owned) {
     const slot = uiEl('button', undefined, 'invSlot' + (kind === selectedItem ? ' sel' : '') + (kind === activePotion() ? ' active' : ''));
     slot.append(potionIcon(kind), uiEl('span', String(qty), 'badge'));
     if (kind === activePotion()) slot.append(uiEl('span', 'ATIVA', 'tag'));
     slot.title = POTION_NAMES[kind];
-    slot.addEventListener('click', () => { selectedItem = kind; showInventory(); });
+    slot.addEventListener('click', () => { selectedItem = selectedItem === kind ? null : kind; showInventory(); });
     grid.append(slot);
   }
+  if (!selectedItem) { wrap.append(grid, uiEl('p', 'Clique em um item para ver os detalhes.', 'note')); return; }
   const kind = selectedItem, isActive = kind === activePotion();
   detail.append(potionIcon(kind, 'huge'), uiEl('h3', POTION_NAMES[kind]), uiEl('p', POTION_DESCRIPTIONS[kind], 'desc'), uiEl('p', `Quantidade: ${ownedItems()[kind]}`, 'qtyLine'));
   const status = uiEl('p', isActive ? '✔ Esta poção está no botão rápido (tecla F).' : 'Ative para colocá-la no botão ao lado do ataque.', 'note');
