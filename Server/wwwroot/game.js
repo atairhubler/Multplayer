@@ -15,9 +15,45 @@ let customImage = null; // data URL do avatar enviado pelo usuário
 // ---- Upload de avatar: recorta em 2:3, reduz para 64x96 e comprime ----
 const fileInput = document.getElementById('avatarFile');
 const preview = document.getElementById('avatarPreview');
-const MAX_IMAGE_CHARS = 40000; // mesmo limite do servidor
+const MAX_IMAGE_CHARS = 40000; // imagens estáticas (recomprimidas)
+const MAX_GIF_BYTES = 250 * 1024; // GIFs animados são enviados como estão
 
-function processImage(file) {
+// Conta os quadros de um GIF percorrendo seus blocos
+function countGifFrames(bytes) {
+  let i = 6, frames = 0;
+  const skipSub = () => { while (i < bytes.length && bytes[i] !== 0) i += bytes[i] + 1; i++; };
+  const flags = bytes[10];
+  i = 13 + (flags & 0x80 ? 3 * (1 << ((flags & 7) + 1)) : 0);
+  while (i < bytes.length) {
+    const b = bytes[i++];
+    if (b === 0x21) { i++; skipSub(); }
+    else if (b === 0x2c) {
+      frames++;
+      const f = bytes[i + 8];
+      i += 9 + (f & 0x80 ? 3 * (1 << ((f & 7) + 1)) : 0) + 1;
+      skipSub();
+    } else break; // 0x3B (fim) ou dado inesperado
+  }
+  return frames;
+}
+
+function readAsDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = () => reject(new Error('Não foi possível ler o arquivo.'));
+    fr.readAsDataURL(file);
+  });
+}
+
+async function processImage(file) {
+  if (file.type === 'image/gif') {
+    const frames = countGifFrames(new Uint8Array(await file.arrayBuffer()));
+    if (frames > 1) { // animado: mantém o GIF original (recomprimir no canvas perderia a animação)
+      if (file.size > MAX_GIF_BYTES) throw new Error('GIF muito grande (máximo 250 KB).');
+      return readAsDataURL(file);
+    }
+  }
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
@@ -84,7 +120,7 @@ document.getElementById('join').addEventListener('click', async () => {
 });
 
 function startPhaser() {
-  new Phaser.Game({
+  phaserGame = new Phaser.Game({
     type: Phaser.AUTO,
     parent: 'game',
     width: WORLD_W,
@@ -99,10 +135,34 @@ function startPhaser() {
 const remotePlayers = {}; // id -> { rect, label, targetX, targetY }
 let player, localSprite, nameLabel, cursors, lastSent = 0, lastX = 0, lastY = 0;
 
+const gifSprites = new Set(); // { sprite, img }
+let phaserGame;
+
+function updateGifs() {
+  const r = phaserGame.canvas.getBoundingClientRect();
+  const k = r.width / WORLD_W;
+  for (const { sprite, img } of gifSprites) {
+    img.style.width = 32 * k + 'px';
+    img.style.height = 48 * k + 'px';
+    img.style.transform = `translate(${r.left + (sprite.x - 16) * k}px, ${r.top + (sprite.y - 24) * k}px)`;
+  }
+}
+
 // Cria o sprite de um personagem: cor sólida, ou imagem enviada (carregada de forma assíncrona)
 function makeSprite(scene, character) {
   const isImage = character.startsWith('data:image/');
   const sprite = scene.add.image(0, 0, isImage ? 'c_gray' : 'c_' + character).setDisplaySize(32, 48);
+  if (character.startsWith('data:image/gif')) {
+    // GIF animado: o canvas não anima, então uma <img> HTML acompanha o sprite (que fica invisível)
+    const img = document.createElement('img');
+    img.className = 'gifSprite';
+    img.src = character;
+    document.getElementById('sprites').appendChild(img);
+    sprite.setAlpha(0);
+    gifSprites.add({ sprite, img });
+    sprite.once('destroy', () => { img.remove(); for (const g of gifSprites) if (g.sprite === sprite) gifSprites.delete(g); });
+    return sprite;
+  }
   if (isImage) {
     const key = 'u_' + character.length + '_' + character.slice(-40);
     const apply = () => { if (sprite.active) sprite.setTexture(key).setDisplaySize(32, 48); };
@@ -247,6 +307,7 @@ function update(time) {
     r.rect.y = Phaser.Math.Linear(r.rect.y, r.targetY, 0.25);
     r.label.setPosition(r.rect.x, r.rect.y - 38);
   }
+  updateGifs();
 }
 
 // ---- Controles de toque (celular) ----

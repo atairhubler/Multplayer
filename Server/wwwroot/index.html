@@ -22,6 +22,8 @@
     .upload { display: flex; align-items: center; gap: 10px; margin: 6px 0 18px; font-size: 12px; }
     .upload input { max-width: 190px; }
     #avatarPreview { width: 36px; height: 54px; object-fit: cover; border: 3px solid #fff; border-radius: 4px; }
+    #sprites { position: fixed; inset: 0; pointer-events: none; z-index: 1; overflow: hidden; }
+    .gifSprite { position: absolute; left: 0; top: 0; object-fit: cover; transform-origin: 0 0; }
     #error { color: #f77; margin-top: 10px; min-height: 18px; font-size: 13px; }
     body { display: flex; }
     #game { flex: 1; min-width: 0; height: 100vh; }
@@ -83,6 +85,7 @@
   </form>
   <button id="chatOpen" title="Abrir chat">💬</button>
   <div id="game"></div>
+  <div id="sprites"></div>
   <div id="touch">
     <div class="grp"><button data-key="left">◀</button><button data-key="right">▶</button></div>
     <button id="talkBtn" title="Falar">💬</button>

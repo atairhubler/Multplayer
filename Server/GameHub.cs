@@ -37,8 +37,8 @@ public class GameHub : Hub
     }
 
     private static readonly string[] Colors = { "red", "blue", "green", "yellow" };
-    private static readonly Regex ImageDataUrl = new(@"^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$", RegexOptions.Compiled);
-    private const int MaxImageChars = 40_000;
+    private static readonly Regex ImageDataUrl = new(@"^data:image/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$", RegexOptions.Compiled);
+    private const int MaxImageChars = 400_000; // GIF animado de até ~250 KB
 
     // Aceita uma cor conhecida ou uma imagem pequena em data URL; qualquer outra coisa vira "red"
     private static string SanitizeCharacter(string? character)
