@@ -303,6 +303,32 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
         await Clients.Client(toId).SendAsync("VoiceSignal", Context.ConnectionId, payload);
     }
 
+    // Compartilhamento de tela ("projeção"): quem compartilha avisa; cada espectador liga para quem compartilha
+    // (WebRTC, vídeo só de ida). O servidor apenas guarda o estado e repassa offer/answer/ICE.
+    public async Task StartShare()
+    {
+        if (!Players.TryGetValue(Context.ConnectionId, out var me) || me.Sharing || !Allow(1500)) return;
+        me.Sharing = true;
+        await Clients.OthersInGroup(Room).SendAsync("ShareState", me.Id, true);
+        await SayAll($"📺 {me.Name} começou a compartilhar a tela. Clique na projeção sobre a cabeça do jogador para ampliar.");
+    }
+
+    public async Task StopShare()
+    {
+        if (!Players.TryGetValue(Context.ConnectionId, out var me) || !me.Sharing) return;
+        me.Sharing = false;
+        await Clients.OthersInGroup(Room).SendAsync("ShareState", me.Id, false);
+    }
+
+    // Repassa mensagens de conexão do compartilhamento; um dos dois lados precisa ser quem compartilha
+    public async Task ShareSignal(string toId, string payload)
+    {
+        if (payload is null || payload.Length > 20_000 || toId == Context.ConnectionId) return;
+        if (!Players.TryGetValue(Context.ConnectionId, out var me) || !Players.TryGetValue(toId, out var to)) return;
+        if (!me.Sharing && !to.Sharing) return;
+        await Clients.Client(toId).SendAsync("ShareSignal", Context.ConnectionId, payload);
+    }
+
     // Pique-pega
     public Task StartTag() => TagGame.Start(hubContext, Context.ConnectionId);
     public Task StopTag() => TagGame.Stop(hubContext, Context.ConnectionId);

@@ -62,6 +62,18 @@
     #online.closed #onlineList, #online.closed #onlineHint { display: none; }
     #onlineHint { font-size: 11px; color: #cfd8dc; padding: 2px 4px; }
     /* Emotes no celular */
+    /* Projeção de ilusão arcana: moldura sobre a cabeça de quem compartilha a tela, com o vídeo dentro */
+    .proj { position: absolute; left: 0; top: 0; pointer-events: auto; cursor: zoom-in; animation: projGlow 3s ease-in-out infinite; }
+    .proj video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #0b1030; }
+    .proj .ring { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; user-select: none; -webkit-user-drag: none; }
+    .proj .idle { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
+      padding: 0 18%; color: #cfe3ff; font-size: calc(11px * var(--k, 1)); line-height: 1.25; text-shadow: 0 0 6px #000; pointer-events: none; }
+    @keyframes projGlow { 0%, 100% { filter: drop-shadow(0 0 4px #7ab8ff66); } 50% { filter: drop-shadow(0 0 12px #b58cffcc); } }
+    #theater { position: fixed; inset: 0; z-index: 40; background: rgba(0, 0, 0, .88); display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 12px; cursor: zoom-out; }
+    #theater[hidden] { display: none; }
+    #theater video { max-width: 92vw; max-height: 80vh; background: #000; border-radius: 8px; box-shadow: 0 0 40px #7ab8ff66; }
+    #theaterCaption { font-size: 14px; color: #cfd8dc; }
     #hud { position: fixed; z-index: 6; transform: translateX(-50%); padding: 4px 14px; background: rgba(0, 0, 0, .55);
       border-radius: 14px; font-size: 14px; pointer-events: none; text-shadow: 1px 1px 2px #000; white-space: nowrap; }
     #hud[hidden] { display: none; }
@@ -131,6 +143,7 @@
   </div>
   <div id="emoteTray"></div>
   <div id="hud" hidden></div>
+  <div id="theater" hidden><video autoplay playsinline></video><div id="theaterCaption"></div></div>
   <div id="interactHint" hidden></div>
   <div id="rotate"><div style="font-size:64px">📱</div><div>Gire o celular para o modo paisagem para jogar</div></div>
   <div id="touch">

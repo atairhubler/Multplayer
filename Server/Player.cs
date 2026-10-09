@@ -11,4 +11,5 @@ public class Player
     public string? Title { get; set; }       // um dos títulos permitidos
     public bool Dancing { get; set; }
     public string? RidingOn { get; set; }    // id de quem está carregando este jogador
+    public bool Sharing { get; set; }        // está compartilhando a tela na "projeção"
 }

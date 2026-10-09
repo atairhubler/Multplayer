@@ -264,6 +264,7 @@ function createRemote(scene, p, announce = false) {
   if (p.ridingOn) { ridingMap[p.id] = p.ridingOn; rect.setDepth(2); }
   refreshLabel(p.id);
   renderOnline();
+  if (p.sharing) markSharer(p.id); // já estava compartilhando a tela quando você entrou (a projeção aparece; assistir é por interação)
 }
 
 // ---- Balões de fala sobre a cabeça ----
@@ -286,7 +287,7 @@ function updateBubbles(now) {
     const anchor = id === connection.connectionId ? localSprite : remotePlayers[id]?.rect;
     if (!anchor || now > b.expires) { b.text.destroy(); delete bubbles[id]; continue; }
     const half = b.text.width / 2;
-    b.text.setPosition(Phaser.Math.Clamp(anchor.x, half, WORLD_W - half), anchor.y - BUBBLE_DY - liftFor(id));
+    b.text.setPosition(Phaser.Math.Clamp(anchor.x, half, WORLD_W - half), anchor.y - BUBBLE_DY - liftFor(id) - shareLift(id));
   }
 }
 
@@ -384,6 +385,7 @@ function create() {
     delete ridingMap[id];
     voice.members.delete(id);
     closePeer(id);
+    dropShare(id);
     renderOnline();
   });
 
@@ -455,6 +457,7 @@ function update(time, delta) {
   }
   updateInteractHint(carrier);
   updateGifs();
+  updateProjections();
   positionChat();
   updateBackground(this, time);
 }
@@ -527,6 +530,7 @@ function setupChat() {
   connection.on('ChatHistory', list => list.forEach(m => addChatLine(m.name, m.text)));
   connection.on('ChatMessage', m => { addChatLine(m.name, m.text); showBubble(m.id, m.text); });
   setupVoiceEvents();
+  setupShareEvents();
   chatReady = true;
   // depois do histórico, que chega logo ao entrar
   setTimeout(() => addChatLine(null, `👋 Bem-vindo, ${myName}! Digite /comandos para ver tudo que você pode fazer.`), 700);
@@ -902,14 +906,21 @@ const SPOTS = [
   { x: 598, range: 55, text: 'Comprar tomates na barraca' },
   { x: 122, range: 55, text: 'Bater na porta' },
 ];
-let currentSpot = -1;
+let currentSpot = -1, lastHintKey = null, currentShareTarget = null;
 
 function updateInteractHint(riding) {
-  const spot = riding ? -1 : SPOTS.findIndex(sp => Math.abs(player.x - sp.x) < sp.range);
-  if (spot === currentSpot) return;
+  const target = riding ? null : nearestSharer(); // uma transmissão por perto tem prioridade sobre os pontos do vilarejo
+  const spot = riding || target ? -1 : SPOTS.findIndex(sp => Math.abs(player.x - sp.x) < sp.range);
+  const key = target ? 'share:' + target + (share.views[target] ? ':on' : '') : spot;
+  if (key === lastHintKey) return;
+  lastHintKey = key;
   currentSpot = spot;
-  interactHint.hidden = spot < 0;
-  if (spot >= 0) interactHint.textContent = (coarsePointer ? '👆 Toque: ' : 'Aperte E: ') + SPOTS[spot].text;
+  currentShareTarget = target;
+  interactHint.hidden = spot < 0 && !target;
+  const pre = coarsePointer ? '👆 Toque: ' : 'Aperte E: ';
+  const name = target && (remotePlayers[target]?.name || 'alguém');
+  if (target) interactHint.textContent = pre + (share.views[target] ? 'Ampliar a transmissão de ' : 'Assistir à transmissão de ') + name;
+  else if (spot >= 0) interactHint.textContent = pre + SPOTS[spot].text;
 }
 
 const doGreet = () => connection.invoke('Greet');
@@ -918,8 +929,9 @@ const doRide = () => connection.invoke('ToggleRide');
 const setDancing = on => { localDancing = on; connection.invoke('SetDancing', on); };
 const doDance = () => { if (!ridingMap[myId()]) setDancing(!localDancing); };
 const doInteract = () => {
+  if (currentShareTarget) return interactShare(currentShareTarget);
   if (currentSpot >= 0) connection.invoke('Interact', currentSpot);
-  else addChatLine(null, 'Chegue perto de um ponto do vilarejo: a fonte, as barracas, a padaria, a ferraria ou a porta da esquerda.');
+  else addChatLine(null, 'Chegue perto de um ponto do vilarejo (fonte, barracas, padaria, ferraria, porta) ou de uma projeção de tela.');
 };
 interactHint.addEventListener('click', doInteract);
 
@@ -1019,6 +1031,11 @@ const HELP = {
     'Use 🎤 para mutar o microfone e 🎧 de novo para sair. Quem fala aparece com 🎙️ no nome, e o volume diminui com a distância.',
     'Também funciona com /voz entrar, /voz sair e /voz mutar. Precisa de um navegador com permissão de microfone.',
   ],
+  compartilhar: [
+    '📺 Compartilhar tela: digite /compartilhar, escolha a tela, janela ou aba e ela aparece numa projeção arcana sobre a sua cabeça para todos.',
+    'Para parar, digite /compartilhar de novo (ou use o botão de parar do navegador). Para ouvir o som, marque "compartilhar áudio" ao escolher a aba.',
+    'Clique na projeção de qualquer pessoa para ampliar (Esc fecha). Só funciona para compartilhar em computador; assistir funciona em qualquer aparelho.',
+  ],
   titulo: null,
   cor: [
     '🎨 Cor do nome: digite /cor seguido de um código de cor, por exemplo /cor #ff8800. Você também escolhe na tela de entrada.',
@@ -1026,7 +1043,7 @@ const HELP = {
 };
 const ALIASES = {
   ajuda: 'comandos', help: 'comandos', dancar: 'danca', costas: 'subir', montar: 'subir', carregar: 'subir',
-  interagir: 'vilarejo', cumprimento: 'cumprimentar', empurrao: 'empurrar', titulos: 'titulo',
+  interagir: 'vilarejo', projecao: 'compartilhar', tela: 'compartilhar', cumprimento: 'cumprimentar', empurrao: 'empurrar', titulos: 'titulo',
 };
 const say = lines => lines.forEach(l => addChatLine(null, l));
 
@@ -1048,6 +1065,7 @@ function runCommand(text) {
       '/titulo — ver e escolher seus títulos',
       '/cor — mudar a cor do seu nome',
       '/voz — chat de voz com microfone',
+      '/compartilhar — compartilhar sua tela numa projeção sobre a sua cabeça',
     ]);
   }
   if (cmd === 'emote' && /^[1-6]$/.test(args[0] || '')) return sendEmote(Number(args[0]) - 1);
@@ -1058,6 +1076,10 @@ function runCommand(text) {
     if (a === 'entrar') return joinVoice();
     if (a === 'sair') return leaveVoice();
     if (a === 'mutar') return toggleMute();
+  }
+  if (cmd === 'compartilhar') {
+    if (args[0]?.toLowerCase() === 'ajuda') return say(HELP.compartilhar);
+    return share.on ? stopShare() : startShare();
   }
   if (cmd === 'titulo') return titleCommand(args);
   if (cmd === 'cor' && args[0]) return colorCommand(args[0]);
@@ -1275,3 +1297,278 @@ function setupVoiceEvents() {
 
 voiceBtn.addEventListener('click', () => (voice.on ? leaveVoice() : joinVoice()));
 micBtn.addEventListener('click', toggleMute);
+
+// ======================= Projeção: compartilhar a tela (WebRTC) =======================
+// Quem compartilha mostra o vídeo numa moldura sobre a cabeça. Cada espectador liga para quem compartilha
+// (vídeo só de ida), então só quem assiste consome a internet de quem compartilha. Os servidores STUN são os da voz.
+let projMeta = null;
+const projReady = fetch('assets/projecao.json').then(r => r.json()).then(m => { projMeta = m; });
+const PROJ_W = 130; // largura da projeção no mundo (px)
+const PROJ_BOTTOM_DY = CHAR_H / 2 + 46; // a moldura fica logo acima do nome (e do título)
+// quem está compartilhando tem o balão de fala acima da projeção, para não ficar escondido atrás dela
+const shareLift = id => ((id === myId() ? share.on : share.sharers.has(id)) && projMeta ? PROJ_W * projMeta.height / projMeta.width + 8 : 0);
+const SHARE_MAX_BITRATE = 800_000;
+
+const SHARE_RANGE = 170; // distância (no mundo) para interagir com a projeção e começar a assistir
+const SHARE_STOP = 720;  // se você se afastar além disto, a transmissão para de chegar até você (economiza internet de quem compartilha)
+// sharers: quem está compartilhando; viewers: conexões de quem me assiste; views: as minhas, de quem eu assisto
+const share = { on: false, stream: null, sharers: new Set(), viewers: {}, views: {} };
+const projections = {}; // id -> { root, video }
+let theaterId = null;
+
+function ensureProjection(id) {
+  if (projections[id]) return projections[id];
+  const m = projMeta;
+  const root = document.createElement('div');
+  root.className = 'proj';
+  const video = document.createElement('video');
+  video.autoplay = true; video.playsInline = true; video.muted = id === myId();
+  // o vídeo só aparece dentro da abertura oval da moldura (um pouco maior; o anel cobre a borda)
+  video.style.clipPath = `ellipse(${(m.rx * 100 + 1.5).toFixed(1)}% ${(m.ry * 100 + 1.5).toFixed(1)}% at ${m.cx * 100}% ${m.cy * 100}%)`;
+  // aviso dentro da abertura enquanto ninguém está assistindo (quem compartilha vê a própria tela direto)
+  const idle = document.createElement('div');
+  idle.className = 'idle';
+  idle.style.clipPath = video.style.clipPath;
+  idle.textContent = id === myId() ? '' : (coarsePointer ? '▶ Chegue perto e toque' : '▶ Chegue perto e aperte E');
+  const ring = new Image();
+  ring.className = 'ring'; ring.src = 'assets/projecao.png'; ring.draggable = false;
+  root.append(video, idle, ring);
+  root.addEventListener('click', () => onProjectionClick(id));
+  document.getElementById('sprites').appendChild(root);
+  return (projections[id] = { root, video, idle });
+}
+
+function removeProjection(id) {
+  projections[id]?.root.remove();
+  delete projections[id];
+  if (theaterId === id) closeTheater();
+}
+
+function updateProjections() {
+  if (!projMeta) return;
+  const r = phaserGame.canvas.getBoundingClientRect(), k = r.width / WORLD_W;
+  const h = PROJ_W * projMeta.height / projMeta.width;
+  for (const [id, p] of Object.entries(projections)) {
+    const sprite = id === myId() ? localSprite : remotePlayers[id]?.rect;
+    p.root.style.display = sprite ? '' : 'none';
+    if (!sprite) continue;
+    p.root.style.setProperty('--k', k);
+    p.root.style.width = PROJ_W * k + 'px';
+    p.root.style.height = h * k + 'px';
+    p.root.style.transform = `translate(${r.left + (sprite.x - PROJ_W / 2) * k}px, ${r.top + (sprite.y - PROJ_BOTTOM_DY - h - liftFor(id)) * k}px)`;
+  }
+}
+
+// o som da transmissão diminui com a distância, como a voz; ficar longe demais encerra a visualização
+setInterval(() => {
+  for (const [id, p] of Object.entries(projections)) {
+    const r = remotePlayers[id]?.rect;
+    if (!r || id === myId() || typeof player === 'undefined') continue;
+    const d = Math.hypot(r.x - player.x, r.y - player.y);
+    if (share.views[id] && d > SHARE_STOP) { stopWatching(id); continue; }
+    if (theaterId === id) continue;
+    p.video.volume = Math.max(VOICE_MIN_VOLUME, Math.min(1, 1 - (d - VOICE_NEAR) / (VOICE_FAR - VOICE_NEAR) * (1 - VOICE_MIN_VOLUME)));
+  }
+}, 200);
+
+// ---- Tela ampliada (clique na projeção) ----
+const theater = document.getElementById('theater');
+const theaterVideo = theater.querySelector('video');
+function openTheater(id) {
+  const p = projections[id];
+  if (!p || !p.video.srcObject) return;
+  theaterId = id;
+  theaterVideo.srcObject = p.video.srcObject;
+  theaterVideo.muted = id === myId();
+  theaterVideo.play().catch(() => {});
+  p.video.muted = true; // o som sai só pela tela ampliada
+  const name = id === myId() ? 'Você' : remotePlayers[id]?.name || 'Alguém';
+  document.getElementById('theaterCaption').textContent = `📺 ${name} — clique ou aperte Esc para fechar`;
+  theater.hidden = false;
+}
+function closeTheater() {
+  theater.hidden = true;
+  theaterVideo.srcObject = null;
+  const p = projections[theaterId];
+  if (p) p.video.muted = theaterId === myId();
+  theaterId = null;
+}
+theater.addEventListener('click', closeTheater);
+window.addEventListener('keydown', e => { if (e.key === 'Escape' && !theater.hidden) closeTheater(); });
+
+// ---- Quem compartilha ----
+const sendShareSignal = (id, obj) => connection.invoke('ShareSignal', id, JSON.stringify(obj)).catch(() => {});
+
+async function startShare() {
+  if (share.on) return;
+  if (!navigator.mediaDevices?.getDisplayMedia) {
+    return say(['Este navegador/aparelho não permite compartilhar a tela. Use o computador (Chrome, Edge ou Firefox).']);
+  }
+  try {
+    share.stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: { ideal: 15, max: 20 }, width: { max: 1280 }, height: { max: 720 } }, // miniatura leve
+      audio: true,
+    });
+  } catch { return say(['Compartilhamento cancelado.']); }
+
+  const vt = share.stream.getVideoTracks()[0];
+  if (vt) { vt.contentHint = 'detail'; vt.addEventListener('ended', stopShare); } // botão "parar" do navegador
+  await projReady;
+  share.on = true;
+  const p = ensureProjection(myId());
+  p.video.srcObject = share.stream;
+  p.idle.style.display = 'none';
+  connection.invoke('StartShare');
+  say(['📺 Você está compartilhando a tela. Para parar, digite /compartilhar de novo. Clique na projeção para ampliar.']);
+}
+
+function stopShare() {
+  if (!share.on) return;
+  share.on = false;
+  connection.invoke('StopShare').catch(() => {});
+  Object.values(share.viewers).forEach(v => v.pc.close());
+  share.viewers = {};
+  share.stream.getTracks().forEach(t => t.stop());
+  share.stream = null;
+  removeProjection(myId());
+  say(['📺 Você parou de compartilhar a tela.']);
+}
+
+async function handleShareSignal(from, payload) {
+  let msg;
+  try { msg = JSON.parse(payload); } catch { return; }
+  try {
+    if (share.on && (msg.sdp?.type === 'offer' || share.viewers[from])) return await answerViewer(from, msg);
+    const view = share.views[from];
+    if (!view) return;
+    if (msg.sdp) {
+      await view.pc.setRemoteDescription(msg.sdp);
+      for (const c of view.pending.splice(0)) await view.pc.addIceCandidate(c).catch(() => {});
+    } else if (msg.candidate) {
+      if (view.pc.remoteDescription) await view.pc.addIceCandidate(msg.candidate).catch(() => {});
+      else view.pending.push(msg.candidate);
+    }
+  } catch { /* mensagem inválida ou fora de ordem */ }
+}
+
+// Quem compartilha atende a oferta de cada espectador e envia a tela (limitando a qualidade)
+async function answerViewer(from, msg) {
+  let v = share.viewers[from];
+  if (!v) {
+    const pc = new RTCPeerConnection({ iceServers: VOICE_ICE_SERVERS });
+    v = share.viewers[from] = { pc, pending: [] };
+    pc.onicecandidate = e => { if (e.candidate) sendShareSignal(from, { candidate: e.candidate }); };
+    pc.onconnectionstatechange = () => {
+      if (['failed', 'closed'].includes(pc.connectionState) && share.viewers[from] === v) { pc.close(); delete share.viewers[from]; }
+    };
+  }
+  const { pc } = v;
+  if (msg.sdp) {
+    await pc.setRemoteDescription(msg.sdp);
+    for (const c of v.pending.splice(0)) await pc.addIceCandidate(c).catch(() => {});
+    if (msg.sdp.type === 'offer') {
+      share.stream.getTracks().forEach(t => pc.addTrack(t, share.stream));
+      await pc.setLocalDescription(await pc.createAnswer());
+      sendShareSignal(from, { sdp: pc.localDescription });
+      pc.getSenders().filter(s => s.track?.kind === 'video').forEach(async sender => {
+        try {
+          const params = sender.getParameters();
+          params.encodings = params.encodings?.length ? params.encodings : [{}];
+          params.encodings[0].maxBitrate = SHARE_MAX_BITRATE;
+          await sender.setParameters(params);
+        } catch {}
+      });
+    }
+  } else if (msg.candidate) {
+    if (pc.remoteDescription) await pc.addIceCandidate(msg.candidate).catch(() => {});
+    else v.pending.push(msg.candidate);
+  }
+}
+
+// ---- Quem assiste ----
+async function startWatching(id) {
+  if (share.views[id] || id === myId()) return;
+  await projReady;
+  if (share.views[id]) return;
+  const pc = new RTCPeerConnection({ iceServers: VOICE_ICE_SERVERS });
+  const view = share.views[id] = { pc, pending: [] };
+  pc.addTransceiver('video', { direction: 'recvonly' });
+  pc.addTransceiver('audio', { direction: 'recvonly' });
+  const proj = ensureProjection(id);
+  pc.onicecandidate = e => { if (e.candidate) sendShareSignal(id, { candidate: e.candidate }); };
+  pc.ontrack = e => {
+    proj.video.srcObject = e.streams[0] || new MediaStream([e.track]);
+    playProjection(proj.video);
+    proj.idle.style.display = 'none';
+  };
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'failed' && share.views[id] === view) {
+      say([`⚠️ Não consegui receber a tela de ${remotePlayers[id]?.name || 'um amigo'}. A rede pode estar bloqueando conexões diretas (é comum em dados móveis).`]);
+      stopWatching(id);
+    }
+  };
+  await pc.setLocalDescription(await pc.createOffer());
+  sendShareSignal(id, { sdp: pc.localDescription });
+}
+
+// Alguns navegadores bloqueiam vídeo com som sem um toque recente: nesse caso começa sem som (o som vem ao ampliar)
+function playProjection(video) {
+  video.play().catch(() => { video.muted = true; video.play().catch(() => {}); });
+}
+
+// Para de assistir (a projeção continua lá, esperando alguém interagir de novo)
+function stopWatching(id) {
+  share.views[id]?.pc.close();
+  delete share.views[id];
+  const p = projections[id];
+  if (p && id !== myId()) { p.video.srcObject = null; p.idle.style.display = ''; }
+  if (theaterId === id) closeTheater();
+  lastHintKey = null; // reavalia o aviso de interação
+}
+
+// Encerra tudo com um jogador (parou de compartilhar ou saiu)
+function dropShare(id) {
+  share.sharers.delete(id);
+  stopWatching(id);
+  if (share.viewers[id]) { share.viewers[id].pc.close(); delete share.viewers[id]; }
+  if (id !== myId()) removeProjection(id);
+}
+
+// Alguém começou a compartilhar: a projeção aparece sobre a cabeça, mas só assiste quem chegar perto e interagir
+function markSharer(id) {
+  if (id === myId()) return;
+  share.sharers.add(id);
+  projReady.then(() => { if (share.sharers.has(id)) ensureProjection(id); });
+}
+
+function nearestSharer() {
+  let best = null, bestDx = SHARE_RANGE;
+  for (const id of share.sharers) {
+    const r = remotePlayers[id]?.rect;
+    if (!r) continue;
+    const dx = Math.abs(r.x - player.x);
+    if (dx < bestDx && Math.abs(r.y - player.y) < 130) { best = id; bestDx = dx; }
+  }
+  return best;
+}
+
+// E (ou toque) perto da projeção: começa a assistir; se já está assistindo, amplia
+function interactShare(id) {
+  if (share.views[id]) return openTheater(id);
+  say([`📺 Conectando à transmissão de ${remotePlayers[id]?.name || 'um amigo'}... Interaja de novo para ampliar. Se afastar muito, a transmissão para.`]);
+  startWatching(id);
+}
+
+function onProjectionClick(id) {
+  if (id === myId()) return openTheater(id);
+  const r = remotePlayers[id]?.rect;
+  if (!r || Math.abs(r.x - player.x) > SHARE_RANGE * 1.4 || Math.abs(r.y - player.y) > 160) {
+    return say(['Chegue mais perto da projeção para assistir.']);
+  }
+  interactShare(id);
+}
+
+function setupShareEvents() {
+  connection.on('ShareState', (id, on) => { if (on) markSharer(id); else dropShare(id); });
+  connection.on('ShareSignal', handleShareSignal);
+}
