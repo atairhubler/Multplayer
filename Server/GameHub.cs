@@ -17,6 +17,8 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
     private const int UserEmoteCount = 6;
     private static readonly ConcurrentDictionary<string, long> LastEmoteAt = new();
     private static readonly ConcurrentDictionary<string, long> LastActionAt = new();
+    // Limites próprios do dash e da troca de mapa: não podem disputar o limite das ações sociais (o dash bloqueava a saída da arena)
+    private static readonly ConcurrentDictionary<string, long> LastDashAt = new(), LastMapAt = new();
 
     // Títulos que podem ser exibidos ao lado do nome
     internal static readonly string[] AllowedTitles = { "Campeão do Pique-Pega", "Cumprimentador", "Dançarino" };
@@ -302,11 +304,14 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
     // Muda de mapa andando até a borda: vilarejo (borda direita) <-> arena (borda esquerda)
     public async Task ChangeMap(string map)
     {
-        if (!Players.TryGetValue(Context.ConnectionId, out var me) || !Allow(800)) return;
+        if (!Players.TryGetValue(Context.ConnectionId, out var me)) return;
+        var nowMs = Environment.TickCount64;
+        if (LastMapAt.TryGetValue(me.Id, out var lastMap) && nowMs - lastMap < 500) return;
+        LastMapAt[me.Id] = nowMs;
         if (map != "village" && map != ArenaGame.MapName) return;
         if (me.Map == map) return;
         if (map == ArenaGame.MapName && me.X < 1280 - 70) { await Say("Ande até o fim da rua, à direita, para chegar à arena."); return; }
-        if (map == "village" && me.X > 70) return;
+        if (map == "village" && me.X > 120) return;
         if (me.RidingOn is not null) { await Say("Desça das costas do amigo antes de mudar de mapa."); return; }
         if (TagGame.IsParticipant(me.Id)) { await Say("Termine o pique-pega antes de ir para a arena."); return; }
 
@@ -334,7 +339,10 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
     // Dash: o movimento em si é do cliente; aqui só avisamos os outros para desenharem o efeito
     public async Task Dash(int dir)
     {
-        if (!Players.ContainsKey(Context.ConnectionId) || !Allow(250)) return;
+        if (!Players.ContainsKey(Context.ConnectionId)) return;
+        var nowMs = Environment.TickCount64;
+        if (LastDashAt.TryGetValue(Context.ConnectionId, out var lastDash) && nowMs - lastDash < 200) return;
+        LastDashAt[Context.ConnectionId] = nowMs;
         await Clients.OthersInGroup(Room).SendAsync("PlayerDash", Context.ConnectionId, dir < 0 ? -1 : 1);
     }
 
@@ -413,6 +421,8 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
         LastChatAt.TryRemove(id, out _);
         LastEmoteAt.TryRemove(id, out _);
         LastActionAt.TryRemove(id, out _);
+        LastDashAt.TryRemove(id, out _);
+        LastMapAt.TryRemove(id, out _);
         GreetPending.TryRemove(id, out _);
         GreetCount.TryRemove(id, out _);
         DanceStartedAt.TryRemove(id, out _);

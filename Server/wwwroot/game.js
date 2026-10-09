@@ -1,3 +1,16 @@
+// Páginas em cache: logo depois de uma atualização o navegador pode misturar um index.html antigo com este game.js novo
+// (faltam elementos, o script quebra no meio e o personagem "trava" até apertar F5). Se faltar algum elemento, recarrega uma vez.
+(() => {
+  const need = ['join', 'chat', 'online', 'sfxBtn', 'helpBtn', 'helpModal', 'moveHint', 'arenaRank', 'arenaBar', 'arenaMsg', 'arenaWeapons', 'attackBtn'];
+  let missing = need.some(id => !document.getElementById(id));
+  try {
+    if (!missing) { sessionStorage.removeItem('staleReload'); return; }
+    if (sessionStorage.getItem('staleReload') === '1') return; // já tentou: não entra em laço
+    sessionStorage.setItem('staleReload', '1');
+  } catch { if (!missing) return; }
+  fetch(location.href, { cache: 'reload' }).catch(() => {}).finally(() => location.reload());
+})();
+
 // URL do backend no Render (troque após criar o serviço)
 const PRODUCTION_URL = 'https://plataforma-multiplayer.onrender.com';
 const SERVER_URL = location.hostname.endsWith('github.io') ? PRODUCTION_URL
@@ -466,7 +479,8 @@ function update(time, delta) {
   const carrier = carrierId && remotePlayers[carrierId];
   if (!carrier) {
     if (left && !right) facing = -1; else if (right && !left) facing = 1;
-    handleDash(time, left, right);
+    safe(() => handleDash(time, left, right));
+    if (!body.enable) { body.enable = true; body.reset(player.x, player.y); } // nunca fica "congelado" fora de uma carona
   }
 
   if (carrier) { // nas costas de alguém: acompanha o carregador; pular desce
@@ -489,7 +503,9 @@ function update(time, delta) {
     if (localDancing && (left || right || jump)) setDancing(false); // andar interrompe a dança
   }
   jumpLatch = jump;
-  checkMapEdge(delta, left, right, carrier);
+  // um dash contra a borda também conta como "empurrar" a borda (senão soltar a seta logo depois cancelava a troca de mapa)
+  const dashing = time < dashUntil + 250;
+  safe(() => checkMapEdge(delta, left || (dashing && dashDir < 0), right || (dashing && dashDir > 0), carrier, dashing));
 
   if (carrier) {
     localSprite.setPosition(player.x, player.y - CHAR_H * 0.72);
@@ -534,13 +550,22 @@ function update(time, delta) {
     syncVisibility(id);
   }
   if (currentMap === 'village') updateInteractHint(carrier); else hideInteractHint();
-  updateTagFlash();
-  updateGifs();
-  updateProjections();
-  positionChat();
-  if (currentMap === 'village') updateBackground(this, time);
-  drawArenaBars();
-  updateArrows(delta);
+  safe(updateTagFlash);
+  safe(updateGifs);
+  safe(updateProjections);
+  safe(positionChat);
+  if (currentMap === 'village') safe(() => updateBackground(this, time));
+  safe(drawArenaBars);
+  safe(() => updateArrows(delta));
+}
+
+// Roda uma rotina secundária do quadro; se ela falhar, o movimento do personagem não para (o erro aparece no console)
+const safeSeen = new Set();
+function safe(fn) {
+  try { fn(); } catch (e) {
+    const key = String(e && e.message);
+    if (!safeSeen.has(key)) { safeSeen.add(key); console.error('[jogo] erro no quadro:', e); }
+  }
 }
 
 // ---- Controles de toque (celular) ----
@@ -2028,6 +2053,7 @@ const WEAPONS = [
   { name: 'Espada', icon: '⚔️' }, { name: 'Lança', icon: '🔱' }, { name: 'Arco', icon: '🏹' },
   { name: 'Martelo', icon: '🔨' }, { name: 'Garras', icon: '🐾' },
 ];
+const MAP_EDGE_ZONE = 56; // faixa junto da borda onde segurar a seta (ou dar um dash) troca de mapa
 const MAP_EDGE_HOLD_MS = 400, ATTACK_MIN_GAP_MS = 120, ARROW_SPEED = 600, ARROW_RANGE = 650;
 const DASH_SPEED = 600, DASH_MS = 140, DASH_COOLDOWN_MS = 500, DASH_TAP_MS = 250;
 
@@ -2090,11 +2116,11 @@ function setVillageBackground() {
 }
 
 // Segurar → no fim da rua (vilarejo) ou ← no começo da arena por um instante pede a troca de mapa ao servidor
-function checkMapEdge(delta, left, right, carrier) {
+function checkMapEdge(delta, left, right, carrier, dashing = false) {
   const target = currentMap === 'village' ? 'arena' : 'village';
-  const atEdge = !carrier && (target === 'arena' ? right && player.x >= WORLD_W - CHAR_W / 2 - 4 : left && player.x <= CHAR_W / 2 + 4);
-  edgeHold = atEdge ? edgeHold + delta : 0;
-  if (edgeHold < MAP_EDGE_HOLD_MS || Date.now() - mapRequestAt < 2500) return;
+  const atEdge = !carrier && (target === 'arena' ? right && player.x >= WORLD_W - MAP_EDGE_ZONE : left && player.x <= MAP_EDGE_ZONE);
+  edgeHold = atEdge ? (dashing ? MAP_EDGE_HOLD_MS : edgeHold + delta) : 0;
+  if (edgeHold < MAP_EDGE_HOLD_MS || Date.now() - mapRequestAt < 1200) return;
   mapRequestAt = Date.now();
   edgeHold = 0;
   connection.invoke('ChangeMap', target).catch(() => {

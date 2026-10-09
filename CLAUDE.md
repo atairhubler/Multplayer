@@ -99,3 +99,9 @@ IDs de emote: 0–5 teclado; 6🖐️ 7🤝 8💢 9🎵; 20–26 pontos do vilar
 - Bug relatado (voz): com 3 pessoas, B e C não se ouviam (A ouvia os dois). Em teste local com 3 abas as 3 conexões fecham; a causa provável é NAT sem relay; foi adicionado TURN (ainda não confirmado em rede real). Se continuar, pedir o log `[voz]` do console de B e C e configurar um TURN próprio no Render.
 - Indicador 🎙️ (quem fala) não foi confirmado visualmente.
 - Som (música, aviso de entrada) não foi ouvido nos testes automáticos.
+
+## Armadilhas já encontradas (não repetir)
+- **Cache do GitHub Pages:** logo após um deploy o navegador pode misturar `index.html` antigo com `game.js` novo; elementos novos faltam, o script quebra no meio e o personagem "trava" até o F5. O início do `game.js` confere os ids obrigatórios (`need`) e recarrega uma vez; **ao criar elementos novos no HTML que o JS usa no carregamento, acrescente o id nessa lista**.
+- **Limites no servidor:** `Allow()` (ações sociais) é compartilhado; o dash e a troca de mapa têm limites próprios (`LastDashAt`, `LastMapAt`). Nunca faça uma ação frequente (dash) consumir o limite de uma ação crítica (sair da arena).
+- A saída/entrada da arena vale numa faixa de 56 px junto da borda (`MAP_EDGE_ZONE`) e também com um dash contra a borda.
+- `safe()` envolve as rotinas secundárias do quadro (`update`) para um erro nelas não parar o movimento.
