@@ -289,7 +289,7 @@ function create() {
   createColorTextures(this);
   background = this.add.image(0, 0, 'bg' + backgroundPeriod).setOrigin(0).setDisplaySize(WORLD_W, VIEW_H).setDepth(-10);
 
-  // Mapa: chão + 3 plataformas (retângulos estáticos)
+  // Mapa: só o chão (invisível; a rua desenhada no fundo é o chão visível)
   const platforms = this.physics.add.staticGroup();
   const addPlatform = (x, y, w, h, color) => {
     const r = this.add.rectangle(x, y, w, h, color ?? 0).setVisible(color !== null);
@@ -297,11 +297,6 @@ function create() {
     platforms.add(r);
   };
   addPlatform(WORLD_W / 2, 580, WORLD_W, 40, null); // chão invisível (o chão visível é a rua do fundo)
-  addPlatform(200, 450, 200, 20, 0x8b5a2b);
-  addPlatform(520, 340, 200, 20, 0x8b5a2b);
-  addPlatform(150, 220, 160, 20, 0x8b5a2b);
-  addPlatform(850, 450, 200, 20, 0x8b5a2b);
-  addPlatform(1100, 320, 200, 20, 0x8b5a2b);
 
   // Jogador local
   // O corpo físico é um retângulo invisível; a imagem do personagem o acompanha
