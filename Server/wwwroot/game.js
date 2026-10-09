@@ -1,7 +1,7 @@
 // Páginas em cache: logo depois de uma atualização o navegador pode misturar um index.html antigo com este game.js novo
 // (faltam elementos, o script quebra no meio e o personagem "trava" até apertar F5). Se faltar algum elemento, recarrega uma vez.
 (() => {
-  const need = ['join', 'dashBtn', 'stick', 'stickKnob', 'fsBtn', 'fsBtnDesk', 'chat', 'online', 'sfxBtn', 'helpBtn', 'helpModal', 'moveHint', 'arenaRank', 'arenaBar', 'arenaMsg', 'arenaWeapons', 'attackBtn'];
+  const need = ['join', 'minimap', 'dashBtn', 'stick', 'stickKnob', 'fsBtn', 'fsBtnDesk', 'chat', 'online', 'sfxBtn', 'helpBtn', 'helpModal', 'moveHint', 'arenaRank', 'arenaBar', 'arenaMsg', 'arenaWeapons', 'attackBtn'];
   let missing = need.some(id => !document.getElementById(id));
   try {
     if (!missing) { sessionStorage.removeItem('staleReload'); return; }
@@ -17,7 +17,12 @@ const SERVER_URL = location.hostname.endsWith('github.io') ? PRODUCTION_URL
   : location.protocol.startsWith('http') ? location.origin : 'http://localhost:5000';
 
 const COLORS = { red: 0xe74c3c, blue: 0x3498db, green: 0x2ecc71, yellow: 0xf1c40f };
-const WORLD_W = 1280, VIEW_H = 600; // mapa inteiro sempre visível (escala FIT)
+const WORLD_W = 1280, VIEW_H = 600; // o que a tela mostra (escala FIT); vilarejo e arena têm exatamente 1 tela
+// Floresta grande: 5 faixas de fundo (1-2-3-2-1) de 1163 px, e a câmera acompanha o jogador. ATENÇÃO: o servidor tem o mesmo valor (ArenaGame.ForestW).
+const FOREST_TILES = [1, 2, 3, 2, 1], FOREST_TILE_W = 1163, FOREST_BG_H = 649; // a imagem é exibida mais alta que a tela: corta a faixa de terra e o chão fica em GROUND_TOP
+const FOREST_W = FOREST_TILES.length * FOREST_TILE_W; // 5815
+const FOREST_ART_VERSION = 2; // aumente quando as imagens da floresta mudarem (senão o navegador usa a arte antiga do cache)
+let camX = 0, groundRect = null, forestBg = [], frameCount = 0;
 const GROUND_TOP = 594; // onde os pés ficam: bem perto do limite de baixo, na calçada do fundo
 const SEND_INTERVAL_MS = 50; // throttle: ~20 envios/s
 const CHAR_SCALE = 1.4; // tamanho do personagem (1 = 32x48)
@@ -26,6 +31,7 @@ const LABEL_DY = CHAR_H / 2 + 14, BUBBLE_DY = CHAR_H / 2 + 26; // nome e balão 
 
 let connection;
 let currentMap = 'village'; // 'village' (vilarejo), 'forest' (floresta) ou 'arena'
+const mapW = () => (currentMap === 'forest' ? FOREST_W : WORLD_W); // largura do mapa atual
 const isCombat = () => currentMap === 'arena' || currentMap === 'forest'; // mapas com vida, armas e ranking
 let myName = '';
 let myCharacter = 'char:m:4a2c17:f1c27d:3498db';
@@ -228,7 +234,7 @@ function updateGifs() {
     img.style.display = sprite.visible ? '' : 'none';
     img.style.width = CHAR_W * k + 'px';
     img.style.height = CHAR_H * k + 'px';
-    img.style.transform = `translate(${r.left + (sprite.x - CHAR_W / 2) * k}px, ${r.top + (sprite.y - CHAR_H / 2) * k}px)`;
+    img.style.transform = `translate(${r.left + (sprite.x - camX - CHAR_W / 2) * k}px, ${r.top + (sprite.y - CHAR_H / 2) * k}px)`;
   }
 }
 
@@ -376,7 +382,7 @@ function updateBubbles(now) {
     b.text.setVisible(anchor.visible);
     b.text.setAlpha(Math.min(1, (b.expires - now) / 300));
     const half = b.half ?? b.text.width / 2;
-    b.text.setPosition(Phaser.Math.Clamp(anchor.x, half, WORLD_W - half), anchor.y - BUBBLE_DY - liftFor(id) - shareLift(id));
+    b.text.setPosition(Phaser.Math.Clamp(anchor.x, camX + half, camX + WORLD_W - half), anchor.y - BUBBLE_DY - liftFor(id) - shareLift(id));
   }
 }
 
@@ -391,7 +397,7 @@ function preload() {
   this.load.image('bg' + backgroundPeriod, BACKGROUNDS[backgroundPeriod]);
   this.load.image('fundo_arena', 'assets/fundo_arena.jpg');
   this.load.image('placa', 'assets/placa_arena.png');
-  this.load.image('fundo_floresta', 'assets/fundo_floresta.jpg');
+  this.load.image('fundo_floresta', 'assets/fundo_floresta.jpg?v=' + FOREST_ART_VERSION);
   this.load.image('placa_floresta', 'assets/placa_floresta.png');
   this.load.image('balao', 'assets/balao.png');
   this.load.json('balaoMeta', 'assets/balao.json');
@@ -429,6 +435,7 @@ function create() {
     const r = this.add.rectangle(x, y, w, h, color ?? 0).setVisible(color !== null);
     this.physics.add.existing(r, true);
     platforms.add(r);
+    if (!groundRect) groundRect = r;
   };
   addPlatform(WORLD_W / 2, GROUND_TOP + 20, WORLD_W, 40, null); // chão invisível rente à borda inferior (a calçada de pedra do fundo)
 
@@ -496,6 +503,7 @@ function create() {
 
 function update(time, delta) {
   const body = player.body;
+  updateCamera();
   const typing = document.activeElement === chatInput;
   let left = (!typing && cursors.left.isDown) || touch.left;
   let right = (!typing && cursors.right.isDown) || touch.right;
@@ -584,6 +592,7 @@ function update(time, delta) {
   safe(positionChat);
   if (currentMap === 'village') safe(() => updateBackground(this, time));
   safe(updateSlimes);
+  if ((frameCount = (frameCount || 0) + 1) % 6 === 0) safe(updateMinimap);
   safe(updateHeldWeapons);
   safe(drawArenaBars);
   safe(() => updateArrows(delta));
@@ -722,6 +731,8 @@ function positionChat() {
   arenaMsgEl.style.top = r.top + r.height * 0.38 + 'px';
   fsBtnDesk.style.right = innerWidth - r.right + 12 + 44 + 'px';
   fsBtnDesk.style.bottom = innerHeight - r.bottom + 12 + 'px';
+  minimap.style.left = r.left + r.width / 2 + 'px';
+  minimap.style.top = r.top + (isCombat() ? 94 : 8) + 'px';
   helpBtn.style.right = innerWidth - r.right + 12 + 'px';
   helpBtn.style.bottom = innerHeight - r.bottom + (coarsePointer ? 108 : 12) + 'px'; // no celular fica acima dos botões de toque
   chatEl.style.left = r.left + 12 + 'px';
@@ -2053,7 +2064,7 @@ function updateProjections() {
     p.root.style.setProperty('--k', k);
     p.root.style.width = PROJ_W * k + 'px';
     p.root.style.height = h * k + 'px';
-    p.root.style.transform = `translate(${r.left + (sprite.x - PROJ_W / 2) * k}px, ${r.top + (sprite.y - PROJ_BOTTOM_DY - h - liftFor(id)) * k}px)`;
+    p.root.style.transform = `translate(${r.left + (sprite.x - camX - PROJ_W / 2) * k}px, ${r.top + (sprite.y - PROJ_BOTTOM_DY - h - liftFor(id)) * k}px)`;
   }
 }
 
@@ -2334,9 +2345,17 @@ function applyMap(map) {
   document.body.classList.toggle('inArena', arena || map === 'forest'); // (a classe também mostra o botão de ataque na floresta)
   signArena?.setVisible(map === 'village');
   signForest?.setVisible(map === 'village');
+  // cada mapa tem a sua largura: chão e limites do mundo acompanham
+  const w = mapW();
+  groundRect.setSize(w, 40).setPosition(w / 2, GROUND_TOP + 20);
+  groundRect.body.updateFromGameObject();
+  gameScene.physics.world.setBounds(0, 0, w, VIEW_H);
+  background.setVisible(map !== 'forest');
+  for (const im of forestBg) im.setVisible(map === 'forest');
   if (arena) background.setTexture('fundo_arena').setDisplaySize(WORLD_W, VIEW_H);
-  else if (map === 'forest') background.setTexture('fundo_floresta').setDisplaySize(WORLD_W, VIEW_H);
+  else if (map === 'forest') ensureForestBg();
   else setVillageBackground();
+  document.getElementById('minimap').hidden = map !== 'forest';
   for (const id in remotePlayers) syncVisibility(id);
   for (const id in bubbles) { bubbles[id].text.destroy(); delete bubbles[id]; }
   helpModal.hidden = true;
@@ -2345,6 +2364,49 @@ function applyMap(map) {
   hideMoveHint();
   gameScene.cameras.main.fadeIn(300, 0, 0, 0);
   renderOnline();
+}
+
+// Fundo da floresta: faixas lado a lado; as imagens 2 e 3 (grandes) só carregam na primeira ida à floresta
+function buildForestBg() {
+  for (const im of forestBg) im.destroy();
+  forestBg = FOREST_TILES.map((t, i) => {
+    const key = t === 1 ? 'fundo_floresta' : 'fundo_floresta_' + t;
+    const im = gameScene.add.image(i * FOREST_TILE_W, 0, gameScene.textures.exists(key) ? key : 'fundo_floresta')
+      .setOrigin(0, 0).setDisplaySize(FOREST_TILE_W + 1, FOREST_BG_H).setDepth(-10); // +1 px: sem fresta entre as faixas
+    im.setVisible(currentMap === 'forest');
+    return im;
+  });
+}
+function ensureForestBg() {
+  buildForestBg();
+  const missing = [2, 3].filter(t => !gameScene.textures.exists('fundo_floresta_' + t));
+  if (!missing.length) return;
+  for (const t of missing) gameScene.load.image('fundo_floresta_' + t, `assets/fundo_floresta_${t}.jpg?v=${FOREST_ART_VERSION}`);
+  gameScene.load.once('complete', buildForestBg);
+  gameScene.load.start();
+}
+
+// Câmera: acompanha o jogador na horizontal (suavizada) sem passar das bordas do mapa. Manual, para os overlays em HTML usarem o
+// mesmo camX no mesmo quadro (sem atraso). Vilarejo e arena têm 1 tela: câmera parada.
+function updateCamera(snap = false) {
+  const target = Phaser.Math.Clamp(player.x - WORLD_W / 2, 0, Math.max(0, mapW() - WORLD_W));
+  camX = snap || Math.abs(target - camX) < 4 ? target : Math.round(camX + (target - camX) * 0.15);
+  gameScene.cameras.main.setScroll(camX, 0);
+}
+
+// Minimapa da floresta (faixa no topo): você, amigos e slimes; o retângulo mostra o que a tela está vendo
+const minimap = document.getElementById('minimap');
+const minimapCtx = minimap.getContext('2d');
+function updateMinimap() {
+  if (currentMap !== 'forest') return;
+  const W = minimap.width, H = minimap.height, sx = W / FOREST_W;
+  minimapCtx.clearRect(0, 0, W, H);
+  minimapCtx.fillStyle = 'rgba(0,0,0,.55)'; minimapCtx.fillRect(0, 0, W, H);
+  const dot = (x, color, size = 3) => { minimapCtx.fillStyle = color; minimapCtx.fillRect(Math.round(x * sx - size / 2), H / 2 - size / 2, size, size); };
+  for (const sl of Object.values(slimes)) if (!sl.dead) dot(sl.x ?? sl.c.x, '#' + SLIME_COLORS[Math.min(sl.lvl || 0, 4)][1].toString(16).padStart(6, '0'), 2 + Math.min(sl.lvl || 0, 3));
+  for (const r of Object.values(remotePlayers)) if (r.map === 'forest') dot(r.rect.x, '#ffffff', 4);
+  dot(player.x, '#ffd54a', 5);
+  minimapCtx.strokeStyle = '#ffffffcc'; minimapCtx.strokeRect(Math.round(camX * sx) + 0.5, 0.5, Math.round(WORLD_W * sx) - 1, H - 1);
 }
 
 function setVillageBackground() {
@@ -2358,7 +2420,7 @@ function setVillageBackground() {
 // Mapas ligados pelas bordas: floresta ←(esquerda) vilarejo (direita)→ arena. Segurar a seta junto da borda (ou dar um dash
 // contra ela) por um instante pede a troca de mapa ao servidor.
 function edgeTarget(left, right) {
-  const nearL = player.x <= MAP_EDGE_ZONE, nearR = player.x >= WORLD_W - MAP_EDGE_ZONE;
+  const nearL = player.x <= MAP_EDGE_ZONE, nearR = player.x >= mapW() - MAP_EDGE_ZONE;
   if (currentMap === 'village') return left && nearL ? 'forest' : right && nearR ? 'arena' : null;
   if (currentMap === 'forest') return right && nearR ? 'village' : null;
   return left && nearL ? 'village' : null; // arena
@@ -2620,6 +2682,7 @@ function setupArenaEvents() {
     if (id === myId()) {
       if (map !== currentMap) applyMap(map);
       player.body.reset(x, y);
+      updateCamera(true);
       pushUntil = 0; dashUntil = 0; edgeHold = 0; mapRequestAt = Date.now() - 1500;
       localDancing = false;
       if (map === 'arena' || map === 'forest') connection.invoke('SetWeapon', myWeapon).catch(() => {});
@@ -2707,9 +2770,9 @@ Object.assign(HELP, {
     'Dentro da arena, o botão ? mostra as instruções de combate. Para voltar, segure ← no começo da arena.',
   ],
   floresta: [
-    '🌲 Floresta: ande até o fim da rua, à esquerda (onde está a placa), e segure ← por um instante. Tem música heroica e slimes 🟢 para derrotar.',
+    '🌲 Floresta: ande até o fim da rua, à esquerda (onde está a placa), e segure ← por um instante. É grande (a tela acompanha você), tem música heroica e muitos slimes 🟢 para derrotar. A faixa no topo mostra onde estão você (amarelo), os amigos (branco) e os slimes.',
     'Lá você tem vida (100), escolhe a arma com as teclas 1 a 5 e ataca com Espaço ou X, como na arena — mas os jogadores NÃO se machucam entre si, só os slimes. Slime derrotado dá +5 pontos e volta depois de um tempo.',
-    'Cuidado: cada jogador que um slime derrota faz ele dobrar de tamanho, vida e dano (até 10x) e mudar de cor — verde, azul, amarelo, laranja e roxo. Derrotar um slime grande vale mais pontos (5 × o tamanho). Encostar num slime tira vida. Se a vida acabar, você volta para a cidade principal depois de 3 segundos. Para voltar ao vilarejo, ande até o fim da floresta, à direita, e segure →. Dá para cumprimentar, dançar e subir nas costas de amigos lá também.',
+    'Cuidado: cada jogador que um slime derrota faz ele dobrar de tamanho, vida e dano (até 10x) e mudar de cor — verde, azul, amarelo, laranja e roxo. Derrotar um slime grande vale mais pontos (5 × o tamanho). Encostar num slime tira vida. Se a vida acabar, você volta para a cidade principal depois de 3 segundos. Para voltar ao vilarejo, ande até o fim da floresta, à direita (por onde você entrou), e segure →. Dá para cumprimentar, dançar e subir nas costas de amigos lá também.',
   ],
   dash: [
     '💨 Dash: toque duas vezes rápido na seta ← ou → para dar um pequeno impulso. Vale também no ar! Depois há uma pequena pausa antes de usar de novo.',

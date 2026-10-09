@@ -135,7 +135,7 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
     {
         if (!Players.TryGetValue(Context.ConnectionId, out var player)) return;
         if (player.RidingOn is not null) return; // quem está nas costas de alguém segue o carregador
-        x = Math.Clamp(x, 0, 1280);
+        x = Math.Clamp(x, 0, ArenaGame.MapWidth(player.Map));
         y = Math.Clamp(y, 0, 600);
         player.X = x;
         player.Y = y;
@@ -309,12 +309,12 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
         {
             case ("village", "forest"):
                 if (me.X > 120) { hint = "Ande até o fim da rua, à esquerda, para chegar à floresta."; return false; }
-                x = 1220; return true;
+                x = ArenaGame.ForestW - 60; return true; // a floresta é grande: entra pelo fim direito
             case ("village", ArenaGame.MapName):
                 if (me.X < 1280 - 120) { hint = "Ande até o fim da rua, à direita, para chegar à arena."; return false; }
                 x = ArenaGame.EntryX; return true;
             case ("forest", "village"):
-                if (me.X < 1160) return false;
+                if (me.X < ArenaGame.ForestW - 120) return false;
                 x = 60; return true;
             case (ArenaGame.MapName, "village"):
                 if (me.X > 120) return false;

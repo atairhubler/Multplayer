@@ -3,7 +3,8 @@
 //   Arena.jpg          -> fundo_arena.jpg (cópia)
 //   Placa arena.png    -> placa_arena.png (sem margem, reduzida; se o fundo vier branco, ele é removido)
 //   Placa floresta.png -> placa_floresta.png (idem)
-//   Fundo Floresta.jpg -> fundo_floresta.jpg (cópia)
+//   Fundo Floresta.jpg, Fundo Floresta 2.jpg, Fundo Floresta 3.jpg -> fundo_floresta.jpg, fundo_floresta_2.jpg, fundo_floresta_3.jpg (cópias;
+//     as três emendam entre si e formam a floresta grande; ao trocar as imagens, aumente FOREST_ART_VERSION no game.js)
 //   Balao de texto.png -> balao.png + balao.json (pontas do pergaminho e margens do texto)
 const fs = require('fs'), path = require('path');
 const { PNG } = require('pngjs');
@@ -61,7 +62,8 @@ function cropScaled(p, [x0, y0, x1, y1], f) {
 // Fundo da arena
 fs.copyFileSync(path.join(SRC, 'Arena.jpg'), path.join(OUT, 'fundo_arena.jpg'));
 
-fs.copyFileSync(path.join(SRC, 'Fundo Floresta.jpg'), path.join(OUT, 'fundo_floresta.jpg'));
+for (const [src, dst] of [['Fundo Floresta.jpg', 'fundo_floresta.jpg'], ['Fundo Floresta 2.jpg', 'fundo_floresta_2.jpg'], ['Fundo Floresta 3.jpg', 'fundo_floresta_3.jpg']])
+  fs.copyFileSync(path.join(SRC, src), path.join(OUT, dst));
 
 // Placas: aparecem pequenas no jogo (~58 px de altura); guardadas em 2x para ficar nítidas
 for (const [src, dst] of [['Placa arena.png', 'placa_arena.png'], ['Placa floresta.png', 'placa_floresta.png']]) {

@@ -12,8 +12,11 @@ public static class ArenaGame
     private const float ArrowSpeed = 600, ArrowRange = 650, ArrowHitX = 26, ArrowHitY = 50; // px/s e px
 
     // Slimes da floresta
-    private const int SlimeCount = 5, SlimeHp = 30, SlimeKillPoints = 5, SlimeRespawnMs = 6000, SlimeContactDamage = 18, SlimeContactImmuneMs = 1500;
-    private const float SlimeSpeed = 95, SlimeGroundY = 580, SlimeMinX = 150, SlimeMaxX = 1150, SlimeSight = 380, SlimeHopMax = 26;
+    // Largura de cada mapa (a floresta é grande e a câmera acompanha o jogador). ATENÇÃO: ForestW é o mesmo valor de FOREST_W no game.js
+    public const float ForestW = 5815;
+    public static float MapWidth(string map) => map == ForestMap ? ForestW : 1280;
+    private const int SlimeCount = 22 /* ~5 por tela */, SlimeHp = 30, SlimeKillPoints = 5, SlimeRespawnMs = 6000, SlimeContactDamage = 18, SlimeContactImmuneMs = 1500;
+    private const float SlimeSpeed = 95, SlimeGroundY = 580, SlimeMinX = 250, SlimeMaxX = ForestW - 450, SlimeSight = 380, SlimeHopMax = 26;
     private const double SlimeHopSeconds = 1.0, SlimeAirFraction = 0.4;
     // Evolução: cada jogador que o slime derrota dobra o tamanho, a vida e o dano dele, até 10x o de um slime normal (1x, 2x, 4x, 8x, 10x)
     private static readonly float[] SlimeMults = { 1, 2, 4, 8, 10 };
@@ -199,7 +202,7 @@ public static class ArenaGame
     private static void HitSlime(string attackerId, State attacker, Slime sl, Weapon w, int dir, int arrowId, long now, List<(string, object?[])> events)
     {
         sl.Hp = Math.Max(0, sl.Hp - w.Damage);
-        sl.X = Math.Clamp(sl.X + dir * w.Knock * 0.08f, 60, 1220);
+        sl.X = Math.Clamp(sl.X + dir * w.Knock * 0.08f, 60, ForestW - 60);
         attacker.Score += HitPoints;
         var slimeId = "slime:" + sl.Id;
         events.Add(("ArenaHit", new object?[] { attackerId, slimeId, w.Damage, sl.Hp, dir, w.Knock, w.Lift, arrowId }));
@@ -281,7 +284,7 @@ public static class ArenaGame
                             }
                         }
                     }
-                    if (hit || a.Traveled >= ArrowRange || a.X < 0 || a.X > 1280 || owner is null) Arrows.RemoveAt(i);
+                    if (hit || a.Traveled >= ArrowRange || a.X < 0 || a.X > MapWidth(a.Map) || owner is null) Arrows.RemoveAt(i);
                 }
 
                 // slimes: só existem enquanto houver alguém na floresta

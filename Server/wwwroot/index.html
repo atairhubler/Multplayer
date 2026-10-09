@@ -85,6 +85,8 @@
       border-radius: 14px; font-size: 20px; pointer-events: none; white-space: nowrap; }
     #attackBtn { display: none; }
     body.inArena #attackBtn { display: block; }
+    #minimap { position: fixed; z-index: 6; transform: translateX(-50%); border: 1px solid #fff6; border-radius: 6px; pointer-events: none; }
+    #minimap[hidden] { display: none; }
     /* Dica de movimento no centro da tela ao entrar */
     #moveHint { position: fixed; z-index: 6; transform: translate(-50%, -50%); padding: 12px 24px; background: rgba(0, 0, 0, .6);
       border: 1px solid #fff8; border-radius: 16px; font-size: 20px; pointer-events: none; text-shadow: 1px 1px 2px #000;
@@ -213,6 +215,7 @@
   <div id="emoteTray"></div>
   <div id="hud" hidden></div>
   <div id="moveHint" hidden></div>
+  <canvas id="minimap" width="240" height="18" hidden></canvas>
   <div id="arenaRank" hidden><h4>⚔️ Ranking da arena</h4><ol id="arenaRankList"></ol></div>
   <div id="arenaBar" hidden>
     <div id="arenaHp"><div id="arenaHpFill"></div><div id="arenaHpText"></div></div>
