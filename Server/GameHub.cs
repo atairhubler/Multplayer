@@ -7,6 +7,11 @@ public class GameHub : Hub
     private const string Room = "ForestMap";
     private static readonly ConcurrentDictionary<string, Player> Players = new();
 
+    // Chat: histórico curto em memória + limite de frequência por conexão
+    private const int MaxChatChars = 200, MaxHistory = 30;
+    private static readonly Queue<ChatMessage> History = new();
+    private static readonly ConcurrentDictionary<string, long> LastChatAt = new();
+
     public async Task JoinGame(string name, string character)
     {
         var player = new Player
@@ -25,6 +30,9 @@ public class GameHub : Hub
         await Groups.AddToGroupAsync(Context.ConnectionId, Room);
 
         await Clients.Caller.SendAsync("ExistingPlayers", existing);
+        ChatMessage[] history;
+        lock (History) history = History.ToArray();
+        await Clients.Caller.SendAsync("ChatHistory", history);
         await Clients.OthersInGroup(Room).SendAsync("PlayerJoined", player);
     }
 
@@ -41,6 +49,26 @@ public class GameHub : Hub
         return "red";
     }
 
+    public async Task SendMessage(string text)
+    {
+        if (!Players.TryGetValue(Context.ConnectionId, out var player)) return;
+        text = (text ?? "").Trim();
+        if (text.Length == 0) return;
+        if (text.Length > MaxChatChars) text = text[..MaxChatChars];
+
+        var now = Environment.TickCount64;
+        if (LastChatAt.TryGetValue(Context.ConnectionId, out var last) && now - last < 400) return;
+        LastChatAt[Context.ConnectionId] = now;
+
+        var msg = new ChatMessage(player.Id, player.Name, text);
+        lock (History)
+        {
+            History.Enqueue(msg);
+            while (History.Count > MaxHistory) History.Dequeue();
+        }
+        await Clients.Group(Room).SendAsync("ChatMessage", msg);
+    }
+
     public async Task UpdatePosition(float x, float y)
     {
         if (!Players.TryGetValue(Context.ConnectionId, out var player)) return;
@@ -51,9 +79,12 @@ public class GameHub : Hub
 
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
+        LastChatAt.TryRemove(Context.ConnectionId, out _);
         if (Players.TryRemove(Context.ConnectionId, out _))
             await Clients.OthersInGroup(Room).SendAsync("PlayerLeft", Context.ConnectionId);
 
         await base.OnDisconnectedAsync(exception);
     }
 }
+
+public record ChatMessage(string Id, string Name, string Text);

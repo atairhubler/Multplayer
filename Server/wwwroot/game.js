@@ -79,6 +79,7 @@ document.getElementById('join').addEventListener('click', async () => {
   }
 
   document.getElementById('login').style.display = 'none';
+  setupChat();
   startPhaser();
 });
 
@@ -124,13 +125,14 @@ function createColorTextures(scene) {
   g.destroy();
 }
 
-function createRemote(scene, p) {
+function createRemote(scene, p, announce = false) {
   if (remotePlayers[p.id]) return;
   const rect = makeSprite(scene, p.characterSprite || 'red').setPosition(p.x, p.y);
+  if (announce) addChatLine(null, p.name + ' entrou');
   const label = scene.add.text(p.x, p.y - 38, p.name, {
     fontSize: '14px', color: '#fff', stroke: '#000', strokeThickness: 3
   }).setOrigin(0.5);
-  remotePlayers[p.id] = { rect, label, targetX: p.x, targetY: p.y };
+  remotePlayers[p.id] = { rect, label, name: p.name, targetX: p.x, targetY: p.y };
 }
 
 function create() {
@@ -167,10 +169,12 @@ function create() {
   this.physics.world.setBounds(0, 0, WORLD_W, VIEW_H);
 
   cursors = this.input.keyboard.createCursorKeys();
+  // Não bloqueia as setas/espaço no resto da página (o campo do chat precisa delas)
+  this.input.keyboard.removeCapture('UP,DOWN,LEFT,RIGHT,SPACE');
 
   // Handlers do SignalR (nomes em camelCase vindos do JSON)
   connection.on('ExistingPlayers', list => list.forEach(p => createRemote(scene, p)));
-  connection.on('PlayerJoined', p => createRemote(scene, p));
+  connection.on('PlayerJoined', p => createRemote(scene, p, true));
   connection.on('PlayerMoved', (id, x, y) => {
     const r = remotePlayers[id];
     if (r) { r.targetX = x; r.targetY = y; }
@@ -178,6 +182,7 @@ function create() {
   connection.on('PlayerLeft', id => {
     const r = remotePlayers[id];
     if (!r) return;
+    addChatLine(null, r.name + ' saiu');
     r.rect.destroy();
     r.label.destroy();
     delete remotePlayers[id];
@@ -188,11 +193,15 @@ function create() {
 
 function update(time) {
   const body = player.body;
-  if (cursors.left.isDown || touch.left) body.setVelocityX(-200);
-  else if (cursors.right.isDown || touch.right) body.setVelocityX(200);
+  const typing = document.activeElement === document.getElementById('chatInput');
+  const left = (!typing && cursors.left.isDown) || touch.left;
+  const right = (!typing && cursors.right.isDown) || touch.right;
+  const jump = (!typing && cursors.up.isDown) || touch.jump;
+  if (left) body.setVelocityX(-200);
+  else if (right) body.setVelocityX(200);
   else body.setVelocityX(0);
 
-  if ((cursors.up.isDown || touch.jump) && body.blocked.down) body.setVelocityY(-500);
+  if (jump && body.blocked.down) body.setVelocityY(-500);
 
   localSprite.setPosition(player.x, player.y);
   nameLabel.setPosition(player.x, player.y - 38);
@@ -224,4 +233,50 @@ document.querySelectorAll('#touch button').forEach(btn => {
 });
 if (matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window) {
   document.getElementById('touch').style.display = 'flex';
+}
+
+// ---- Chat ----
+const chatEl = document.getElementById('chat');
+const chatLog = document.getElementById('chatLog');
+const chatOpenBtn = document.getElementById('chatOpen');
+
+// Usa textContent (nunca innerHTML) para que mensagens não injetem HTML
+function addChatLine(name, text) {
+  const p = document.createElement('p');
+  if (name === null) {
+    p.className = 'sys';
+    p.textContent = text;
+  } else {
+    const who = document.createElement('span');
+    who.className = 'who';
+    who.textContent = name + ': ';
+    p.append(who, document.createTextNode(text));
+  }
+  const atBottom = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 40;
+  chatLog.appendChild(p);
+  while (chatLog.children.length > 200) chatLog.firstChild.remove();
+  if (atBottom || name === myName) chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+function setChatOpen(open) {
+  chatEl.classList.toggle('open', open);
+  chatOpenBtn.classList.toggle('show', !open);
+  window.dispatchEvent(new Event('resize')); // o Phaser reajusta o canvas à nova largura
+}
+
+function setupChat() {
+  setChatOpen(innerWidth > 900); // em tela pequena começa recolhido
+  document.getElementById('chatClose').onclick = () => setChatOpen(false);
+  chatOpenBtn.onclick = () => setChatOpen(true);
+
+  connection.on('ChatHistory', list => list.forEach(m => addChatLine(m.name, m.text)));
+  connection.on('ChatMessage', m => addChatLine(m.name, m.text));
+
+  document.getElementById('chatForm').onsubmit = e => {
+    e.preventDefault();
+    const input = document.getElementById('chatInput');
+    const text = input.value.trim();
+    if (text) connection.invoke('SendMessage', text);
+    input.value = '';
+  };
 }

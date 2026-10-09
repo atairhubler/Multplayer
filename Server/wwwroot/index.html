@@ -23,7 +23,25 @@
     .upload input { max-width: 190px; }
     #avatarPreview { width: 36px; height: 54px; object-fit: cover; border: 3px solid #fff; border-radius: 4px; }
     #error { color: #f77; margin-top: 10px; min-height: 18px; font-size: 13px; }
-    #game { width: 100vw; height: 100vh; }
+    body { display: flex; }
+    #game { flex: 1; min-width: 0; height: 100vh; }
+    #chat { display: none; flex-direction: column; width: 260px; flex: none; height: 100vh; background: #1b1b1b;
+      border-right: 1px solid #333; user-select: text; -webkit-user-select: text; touch-action: pan-y; z-index: 6; }
+    #chat.open { display: flex; }
+    #chatHead { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; font-weight: bold; border-bottom: 1px solid #333; }
+    #chatHead button { width: auto; padding: 2px 8px; font-size: 14px; }
+    #chatLog { flex: 1; overflow-y: auto; padding: 8px 10px; font-size: 14px; touch-action: pan-y; }
+    #chatLog p { margin: 0 0 6px; word-wrap: break-word; overflow-wrap: anywhere; }
+    #chatLog .who { font-weight: bold; color: #7fd1ff; }
+    #chatLog .sys { color: #999; font-style: italic; }
+    #chatForm { display: flex; gap: 6px; padding: 8px; border-top: 1px solid #333; }
+    #chatForm input { flex: 1; min-width: 0; padding: 8px; font-size: 16px; }
+    #chatForm button { width: auto; padding: 8px 12px; font-size: 14px; }
+    #chatOpen { display: none; position: fixed; top: 10px; left: 10px; z-index: 6; width: auto; padding: 6px 10px; font-size: 18px; }
+    #chatOpen.show { display: block; }
+    @media (max-width: 900px) {
+      #chat { position: fixed; left: 0; top: 0; width: 220px; opacity: .93; }
+    }
     #touch { display: none; position: fixed; left: 0; right: 0; bottom: 16px; padding: 0 16px; box-sizing: border-box;
       justify-content: space-between; z-index: 5; pointer-events: none; }
     #touch .grp { display: flex; gap: 14px; }
@@ -54,6 +72,15 @@
       <div id="error"></div>
     </div>
   </div>
+  <aside id="chat">
+    <div id="chatHead"><span>Chat</span><button id="chatClose" title="Recolher">◀</button></div>
+    <div id="chatLog"></div>
+    <form id="chatForm" autocomplete="off">
+      <input id="chatInput" type="text" maxlength="200" placeholder="Digite e Enter...">
+      <button type="submit">Enviar</button>
+    </form>
+  </aside>
+  <button id="chatOpen" title="Abrir chat">💬</button>
   <div id="game"></div>
   <div id="touch">
     <div class="grp"><button data-key="left">◀</button><button data-key="right">▶</button></div>
