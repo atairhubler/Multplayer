@@ -25,7 +25,8 @@ const CHAR_W = Math.round(32 * CHAR_SCALE), CHAR_H = Math.round(48 * CHAR_SCALE)
 const LABEL_DY = CHAR_H / 2 + 14, BUBBLE_DY = CHAR_H / 2 + 26; // nome e balão acima da cabeça
 
 let connection;
-let currentMap = 'village'; // 'village' (vilarejo) ou 'arena'
+let currentMap = 'village'; // 'village' (vilarejo), 'forest' (floresta) ou 'arena'
+const isCombat = () => currentMap === 'arena' || currentMap === 'forest'; // mapas com vida, armas e ranking
 let myName = '';
 let myCharacter = 'char:m:4a2c17:f1c27d:3498db';
 let customImage = null; // data URL do avatar enviado pelo usuário
@@ -367,6 +368,8 @@ function preload() {
   this.load.image('bg' + backgroundPeriod, BACKGROUNDS[backgroundPeriod]);
   this.load.image('fundo_arena', 'assets/fundo_arena.jpg');
   this.load.image('placa', 'assets/placa_arena.png');
+  this.load.image('fundo_floresta', 'assets/fundo_floresta.jpg');
+  this.load.image('placa_floresta', 'assets/placa_floresta.png');
   this.load.image('balao', 'assets/balao.png');
   this.load.json('balaoMeta', 'assets/balao.json');
 }
@@ -395,6 +398,7 @@ function create() {
   background = this.add.image(0, 0, 'bg' + backgroundPeriod).setOrigin(0).setDisplaySize(WORLD_W, VIEW_H).setDepth(-10);
   // placa pequena (menor que um personagem) apontando para a arena, no fim da rua à direita
   signArena = this.add.image(1135, GROUND_TOP, 'placa').setOrigin(0.5, 1).setDisplaySize(97, 58).setDepth(-1);
+  signForest = this.add.image(225, GROUND_TOP, 'placa_floresta').setOrigin(0.5, 1).setDisplaySize(97, 58).setDepth(-1);
 
   // Mapa: só o chão (invisível; a rua desenhada no fundo é o chão visível)
   const platforms = this.physics.add.staticGroup();
@@ -473,7 +477,7 @@ function update(time, delta) {
   let left = (!typing && cursors.left.isDown) || touch.left;
   let right = (!typing && cursors.right.isDown) || touch.right;
   let jump = (!typing && cursors.up.isDown) || touch.jump;
-  if (currentMap === 'arena' && !arenaMeAlive()) left = right = jump = false; // caído: espera o respawn
+  if (isCombat() && !arenaMeAlive()) left = right = jump = false; // caído: espera o respawn
   if (!moveHintDone && (left || right || jump)) hideMoveHint();
   const carrierId = ridingMap[myId()];
   const carrier = carrierId && remotePlayers[carrierId];
@@ -549,12 +553,13 @@ function update(time, delta) {
     placeLabel(r.label, r.rect.x, Math.max(r.rect.y - liftFor(id), LABEL_MIN_Y));
     syncVisibility(id);
   }
-  if (currentMap === 'village') updateInteractHint(carrier); else hideInteractHint();
+  if (currentMap !== 'arena') updateInteractHint(carrier); else hideInteractHint();
   safe(updateTagFlash);
   safe(updateGifs);
   safe(updateProjections);
   safe(positionChat);
   if (currentMap === 'village') safe(() => updateBackground(this, time));
+  safe(updateSlimes);
   safe(drawArenaBars);
   safe(() => updateArrows(delta));
 }
@@ -960,7 +965,7 @@ function sendEmote(i) {
 }
 
 window.addEventListener('keydown', e => {
-  if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || !chatBar.hidden || currentMap === 'arena') return;
+  if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || !chatBar.hidden || isCombat()) return; // nos mapas de combate 1–5 trocam de arma
   if (e.key >= '1' && e.key <= String(EMOTES.length)) sendEmote(Number(e.key) - 1);
 });
 
@@ -1108,7 +1113,7 @@ function danceLoop() {
 }
 
 // a música calma abaixa enquanto toca a de dança ou a de batalha
-const duckAmbient = () => { if (music.bus) music.bus.gain.setTargetAtTime(danceMusic.on || battleMusic.on ? 0.12 : 1, music.ctx.currentTime, 0.4); };
+const duckAmbient = () => { if (music.bus) music.bus.gain.setTargetAtTime(forestMusic.on ? 0 : danceMusic.on || battleMusic.on ? 0.12 : 1, music.ctx.currentTime, 0.4); };
 function setDanceMusic(on) {
   if (danceMusic.on === on || !music.ctx) return;
   danceMusic.on = on;
@@ -1177,11 +1182,96 @@ function setBattleMusic(on) {
   else { clearTimeout(battleMusic.timer); battleMusic.timer = null; }
 }
 
-// a batalha tem prioridade sobre a dança; ao sair da arena volta a música calma
+// ---- Trilha heroica da floresta (~92 bpm, Ré maior): tímpanos, cordas e trompas em fanfarra, em 16 bits ----
+const FOREST_STEP_S = 60 / 92 / 4; // semicolcheias
+const FOREST_PROG = [ // [baixo, acorde (MIDI)]: D A Bm G | D A G A
+  [38, [62, 66, 69]], [45, [61, 64, 69]], [47, [62, 66, 71]], [43, [59, 62, 67]],
+  [38, [62, 66, 69]], [45, [61, 64, 69]], [43, [59, 62, 67]], [45, [61, 64, 69]],
+];
+const FOREST_MELODY = [ // por compasso: [passo, nota MIDI, duração em passos] — a "fanfarra" da trompa
+  [[0, 74, 4], [4, 81, 2], [6, 79, 2], [8, 78, 4], [12, 74, 4]],
+  [[0, 73, 4], [4, 76, 4], [8, 81, 6], [14, 79, 2]],
+  [[0, 74, 4], [4, 78, 2], [6, 79, 2], [8, 81, 4], [12, 78, 4]],
+  [[0, 79, 4], [4, 78, 2], [6, 76, 2], [8, 74, 8]],
+  [[0, 74, 2], [2, 78, 2], [4, 81, 4], [8, 86, 8]],
+  [[0, 85, 4], [4, 81, 4], [8, 79, 4], [12, 76, 4]],
+  [[0, 79, 4], [4, 83, 4], [8, 86, 4], [12, 83, 4]],
+  [[0, 85, 6], [6, 81, 2], [8, 76, 4], [12, 73, 2], [14, 76, 2]],
+];
+const forestMusic = { timer: null, step: 0, nextAt: 0, on: false };
+
+function forestPad(freq, t, dur, gain) { // cordas: serra suave com entrada lenta
+  const ctx = music.ctx, g = ctx.createGain(), lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass'; lp.frequency.value = 1500;
+  g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(gain, t + 0.35); g.gain.setValueAtTime(gain, t + dur - 0.3); g.gain.linearRampToValueAtTime(0.0001, t + dur);
+  lp.connect(g); g.connect(music.master);
+  for (const det of [-6, 6]) {
+    const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = freq; o.detune.value = det;
+    o.connect(lp); o.start(t); o.stop(t + dur + 0.05);
+  }
+}
+
+function forestHorn(freq, t, dur, gain) { // trompa: serra com vibrato
+  const ctx = music.ctx, o = ctx.createOscillator(), g = ctx.createGain(), lp = ctx.createBiquadFilter(), lfo = ctx.createOscillator(), depth = ctx.createGain();
+  o.type = 'sawtooth'; o.frequency.value = freq;
+  lp.type = 'lowpass'; lp.frequency.value = 2600;
+  lfo.frequency.value = 5.5; depth.gain.value = freq * 0.008; lfo.connect(depth); depth.connect(o.frequency);
+  g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(gain, t + 0.04); g.gain.setValueAtTime(gain * 0.8, t + dur * 0.6); g.gain.linearRampToValueAtTime(0.0001, t + dur);
+  o.connect(lp); lp.connect(g); g.connect(music.master);
+  o.start(t); lfo.start(t); o.stop(t + dur + 0.05); lfo.stop(t + dur + 0.05);
+}
+
+function forestStep(t, i) {
+  const ctx = music.ctx, bar = Math.floor(i / 16) % FOREST_PROG.length, s = i % 16;
+  const [bass, chord] = FOREST_PROG[bar];
+  if (s === 0) chord.forEach(n => forestPad(midiFreq(n), t, FOREST_STEP_S * 16, 0.03)); // acorde sustentado
+  if (s === 0 || s === 8) { // tímpano
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(52, t + 0.3);
+    g.gain.setValueAtTime(s === 0 ? 0.75 : 0.5, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+    o.connect(g); g.connect(music.master); o.start(t); o.stop(t + 0.55);
+  }
+  if (s === 4 || s === 12) battleNoise(t, 0.09, 0.16, 'bandpass', 1500); // caixa de marcha, baixinha
+  if (s % 4 === 0) danceTone(midiFreq(bass + (s % 8 === 4 ? 12 : 0)), t, FOREST_STEP_S * 3.6, 'triangle', 0.2); // baixo marcado
+  for (const [at, note, len] of FOREST_MELODY[bar]) if (at === s) forestHorn(midiFreq(note), t, FOREST_STEP_S * len * 0.95, 0.07);
+  if (bar % 4 === 3 && s === 14) { // pequena virada de tímpanos antes de repetir
+    for (let k = 0; k < 2; k++) {
+      const o = ctx.createOscillator(), g = ctx.createGain(), tt = t + k * FOREST_STEP_S * 0.5;
+      o.frequency.setValueAtTime(95, tt); o.frequency.exponentialRampToValueAtTime(55, tt + 0.2);
+      g.gain.setValueAtTime(0.4, tt); g.gain.exponentialRampToValueAtTime(0.0001, tt + 0.25);
+      o.connect(g); g.connect(music.master); o.start(tt); o.stop(tt + 0.3);
+    }
+  }
+}
+
+function forestLoop() {
+  const ctx = music.ctx;
+  if (!forestMusic.on || !ctx) return;
+  if (ctx.state === 'running') {
+    if (forestMusic.nextAt < ctx.currentTime) forestMusic.nextAt = ctx.currentTime + 0.05;
+    while (forestMusic.nextAt < ctx.currentTime + 0.3) {
+      forestStep(forestMusic.nextAt, forestMusic.step++);
+      forestMusic.nextAt += FOREST_STEP_S;
+    }
+  }
+  forestMusic.timer = setTimeout(forestLoop, 80);
+}
+
+function setForestMusic(on) {
+  if (forestMusic.on === on || !music.ctx) return;
+  forestMusic.on = on;
+  duckAmbient();
+  if (on) { forestMusic.step = 0; forestMusic.nextAt = 0; forestLoop(); }
+  else { clearTimeout(forestMusic.timer); forestMusic.timer = null; }
+}
+
+// cada mapa tem a sua música: vilarejo (calma, ou a de dança), floresta (heroica) e arena (batalha)
 setInterval(() => {
   const arena = currentMap === 'arena' && !music.muted;
+  const forest = currentMap === 'forest' && !music.muted;
   setBattleMusic(arena);
-  setDanceMusic(!arena && anyoneDancing());
+  setForestMusic(forest);
+  setDanceMusic(!arena && !forest && anyoneDancing());
 }, 400);
 
 muteBtn.addEventListener('click', () => {
@@ -1224,7 +1314,7 @@ let currentSpot = -1, lastHintKey = null, currentShareTarget = null;
 
 function updateInteractHint(riding) {
   const target = riding ? null : nearestSharer(); // uma transmissão por perto tem prioridade sobre os pontos do vilarejo
-  const spot = riding || target ? -1 : SPOTS.findIndex(sp => Math.abs(player.x - sp.x) < sp.range);
+  const spot = riding || target || currentMap !== 'village' ? -1 : SPOTS.findIndex(sp => Math.abs(player.x - sp.x) < sp.range);
   const key = target ? 'share:' + target + (share.views[target] ? ':on' : '') : spot;
   if (key === lastHintKey) return;
   lastHintKey = key;
@@ -1482,6 +1572,7 @@ function runCommand(text) {
       '/voz — chat de voz com microfone',
       '/compartilhar — compartilhar sua tela numa projeção sobre a sua cabeça',
       '/arena — como entrar na arena e lutar',
+      '/floresta — como ir para a floresta',
       '/dash — dois toques na seta dão um impulso',
     ]);
   }
@@ -2057,7 +2148,7 @@ const MAP_EDGE_ZONE = 56; // faixa junto da borda onde segurar a seta (ou dar um
 const MAP_EDGE_HOLD_MS = 400, ATTACK_MIN_GAP_MS = 120, ARROW_SPEED = 600, ARROW_RANGE = 650;
 const DASH_SPEED = 600, DASH_MS = 140, DASH_COOLDOWN_MS = 500, DASH_TAP_MS = 250;
 
-let signArena = null, facing = 1, myWeapon = 0, edgeHold = 0, mapRequestAt = 0, lastAttackAt = 0;
+let signArena = null, signForest = null, facing = 1, myWeapon = 0, edgeHold = 0, mapRequestAt = 0, lastAttackAt = 0;
 let dashUntil = 0, dashDir = 1, dashReadyAt = 0, prevLeft = false, prevRight = false;
 const lastTap = { left: -1e9, right: -1e9 };
 let arenaList = [], arenaById = {};
@@ -2093,9 +2184,11 @@ function hideInteractHint() {
 function applyMap(map) {
   currentMap = map;
   const arena = map === 'arena';
-  document.body.classList.toggle('inArena', arena);
-  signArena?.setVisible(!arena);
+  document.body.classList.toggle('inArena', arena || map === 'forest'); // (a classe também mostra o botão de ataque na floresta)
+  signArena?.setVisible(map === 'village');
+  signForest?.setVisible(map === 'village');
   if (arena) background.setTexture('fundo_arena').setDisplaySize(WORLD_W, VIEW_H);
+  else if (map === 'forest') background.setTexture('fundo_floresta').setDisplaySize(WORLD_W, VIEW_H);
   else setVillageBackground();
   for (const id in remotePlayers) syncVisibility(id);
   for (const id in bubbles) { bubbles[id].text.destroy(); delete bubbles[id]; }
@@ -2115,16 +2208,22 @@ function setVillageBackground() {
   else { gameScene.load.image(key, BACKGROUNDS[period]); gameScene.load.once('complete', apply); gameScene.load.start(); }
 }
 
-// Segurar → no fim da rua (vilarejo) ou ← no começo da arena por um instante pede a troca de mapa ao servidor
+// Mapas ligados pelas bordas: floresta ←(esquerda) vilarejo (direita)→ arena. Segurar a seta junto da borda (ou dar um dash
+// contra ela) por um instante pede a troca de mapa ao servidor.
+function edgeTarget(left, right) {
+  const nearL = player.x <= MAP_EDGE_ZONE, nearR = player.x >= WORLD_W - MAP_EDGE_ZONE;
+  if (currentMap === 'village') return left && nearL ? 'forest' : right && nearR ? 'arena' : null;
+  if (currentMap === 'forest') return right && nearR ? 'village' : null;
+  return left && nearL ? 'village' : null; // arena
+}
 function checkMapEdge(delta, left, right, carrier, dashing = false) {
-  const target = currentMap === 'village' ? 'arena' : 'village';
-  const atEdge = !carrier && (target === 'arena' ? right && player.x >= WORLD_W - MAP_EDGE_ZONE : left && player.x <= MAP_EDGE_ZONE);
-  edgeHold = atEdge ? (dashing ? MAP_EDGE_HOLD_MS : edgeHold + delta) : 0;
-  if (edgeHold < MAP_EDGE_HOLD_MS || Date.now() - mapRequestAt < 1200) return;
+  const target = carrier ? null : edgeTarget(left, right);
+  edgeHold = target ? (dashing ? MAP_EDGE_HOLD_MS : edgeHold + delta) : 0;
+  if (!target || edgeHold < MAP_EDGE_HOLD_MS || Date.now() - mapRequestAt < 1200) return;
   mapRequestAt = Date.now();
   edgeHold = 0;
   connection.invoke('ChangeMap', target).catch(() => {
-    say(['⚠️ A arena ainda não está disponível no servidor (ele pode estar atualizando). Tente de novo em alguns minutos.']);
+    say(['⚠️ Esse mapa ainda não está disponível no servidor (ele pode estar atualizando). Tente de novo em alguns minutos.']);
   });
 }
 
@@ -2202,7 +2301,7 @@ function sfxDash() { chipNoise(0.14, 0.08, 'bandpass', 1500); chip([300, 450, 60
 
 // ---- Ataque e armas ----
 function doAttack() {
-  if (currentMap !== 'arena' || !chatReady || !arenaMeAlive() || ridingMap[myId()]) return;
+  if (!isCombat() || !chatReady || !arenaMeAlive() || ridingMap[myId()]) return;
   const now = Date.now();
   if (now - lastAttackAt < ATTACK_MIN_GAP_MS) return;
   lastAttackAt = now;
@@ -2226,24 +2325,25 @@ WEAPONS.forEach((w, i) => {
 });
 document.getElementById('attackBtn').addEventListener('pointerdown', e => { e.preventDefault(); doAttack(); });
 window.addEventListener('keydown', e => {
-  if (currentMap !== 'arena' || e.ctrlKey || e.metaKey || e.altKey || !chatReady || !chatBar.hidden || !helpModal.hidden) return;
+  if (!isCombat() || e.ctrlKey || e.metaKey || e.altKey || !chatReady || !chatBar.hidden || !helpModal.hidden) return;
   if (e.code === 'Space' || e.key.toLowerCase() === 'x') { e.preventDefault(); doAttack(); }
   else if (!e.repeat && e.key >= '1' && e.key <= String(WEAPONS.length)) selectWeapon(Number(e.key) - 1);
 });
 
 // ---- HUD: ranking, vida e arma ----
 function updateArenaHud() {
-  const arena = currentMap === 'arena';
+  const arena = isCombat();
   arenaRankEl.hidden = arenaBarEl.hidden = !arena;
   if (!arena) { arenaMsgEl.hidden = true; return; }
+  arenaRankEl.querySelector('h4').textContent = currentMap === 'forest' ? '🌲 Ranking da floresta' : '⚔️ Ranking da arena';
   const me = arenaById[myId()];
   const hp = me ? me.hp : 100;
   arenaHpFill.style.width = hp + '%';
   arenaHpText.textContent = `${hp} / 100`;
   [...weaponsEl.children].forEach((b, i) => b.classList.toggle('sel', i === myWeapon));
   arenaMsgEl.hidden = arenaMeAlive();
-  if (!arenaMsgEl.hidden) arenaMsgEl.textContent = '💀 Você caiu! Voltando à arena em 3 segundos...';
-  arenaRankList.replaceChildren(...arenaList.slice(0, 5).map((p, i) => {
+  if (!arenaMsgEl.hidden) arenaMsgEl.textContent = currentMap === 'forest' ? '💀 Você caiu! Voltando à cidade em 3 segundos...' : '💀 Você caiu! Voltando à arena em 3 segundos...';
+  arenaRankList.replaceChildren(...arenaList.filter(p => p.map === currentMap).slice(0, 5).map((p, i) => {
     const li = document.createElement('li');
     const name = document.createElement('span'), pts = document.createElement('span');
     name.textContent = `${i + 1}. ${p.name}`; // textContent: nomes nunca viram HTML
@@ -2267,7 +2367,13 @@ function setGhost(id, on) {
 function drawArenaBars() {
   if (!barsGfx) barsGfx = gameScene.add.graphics().setDepth(6);
   barsGfx.clear();
-  if (currentMap !== 'arena') return;
+  if (!isCombat()) return;
+  for (const sl of Object.values(slimes)) { // vida dos slimes feridos
+    if (sl.hp >= sl.max || !sl.c.visible) continue;
+    const w = 34, h = 5, x = sl.c.x - w / 2, y = sl.c.y - 46, pct = Phaser.Math.Clamp(sl.hp / sl.max, 0, 1);
+    barsGfx.fillStyle(0x000000, 0.7).fillRect(x - 1, y - 1, w + 2, h + 2);
+    barsGfx.fillStyle(0xe74c3c, 1).fillRect(x, y, w * pct, h);
+  }
   for (const p of arenaList) {
     if (!p.alive || !isHere(p.id)) continue;
     const label = p.id === myId() ? nameLabel : remotePlayers[p.id]?.label;
@@ -2326,10 +2432,10 @@ function hitFx(x, y, dmg) {
   gameScene.tweens.add({ targets: t, y: t.y - 34, alpha: 0, duration: 750, ease: 'Quad.Out', onComplete: () => t.destroy() });
 }
 
-function deathFx(x, y) {
+function deathFx(x, y, color = 0xe74c3c) {
   for (let i = 0; i < 18; i++) {
     const a = Math.random() * Math.PI * 2, d = 30 + Math.random() * 50;
-    const c = gameScene.add.circle(x, y, 3 + Math.random() * 3, i % 3 ? 0xe74c3c : 0xffffff).setDepth(8);
+    const c = gameScene.add.circle(x, y, 3 + Math.random() * 3, i % 3 ? color : 0xffffff).setDepth(8);
     gameScene.tweens.add({ targets: c, x: x + Math.cos(a) * d, y: y + Math.sin(a) * d - 20, alpha: 0, duration: 600, onComplete: () => c.destroy() });
   }
   const t = gameScene.add.text(x, y - 40, '💀', { fontSize: '30px' }).setOrigin(0.5).setDepth(9);
@@ -2348,7 +2454,7 @@ function updateArrows(delta) {
   for (const id in arrows) {
     const a = arrows[id], step = ARROW_SPEED * delta / 1000;
     a.g.x += a.dir * step; a.traveled += step;
-    if (a.traveled >= ARROW_RANGE || currentMap !== 'arena') { a.g.destroy(); delete arrows[id]; }
+    if (a.traveled >= ARROW_RANGE || !isCombat()) { a.g.destroy(); delete arrows[id]; }
   }
 }
 
@@ -2360,7 +2466,7 @@ function setupArenaEvents() {
       player.body.reset(x, y);
       pushUntil = 0; dashUntil = 0; edgeHold = 0; mapRequestAt = Date.now() - 1500;
       localDancing = false;
-      if (map === 'arena') connection.invoke('SetWeapon', myWeapon).catch(() => {});
+      if (map === 'arena' || map === 'forest') connection.invoke('SetWeapon', myWeapon).catch(() => {});
       updateArenaHud();
       return;
     }
@@ -2381,10 +2487,16 @@ function setupArenaEvents() {
   });
 
   connection.on('ArenaSwing', (id, weapon, dir) => swingFx(id, weapon, dir));
-  connection.on('ArrowFired', (arrowId, owner, x, y, dir) => { if (currentMap === 'arena' && isHere(owner)) spawnArrow(arrowId, x, y, dir); });
+  connection.on('ArrowFired', (arrowId, owner, x, y, dir) => { if (isCombat() && isHere(owner)) spawnArrow(arrowId, x, y, dir); });
+  connection.on('SlimeState', list => syncSlimes(list));
 
   connection.on('ArenaHit', (attackerId, victimId, dmg, hp, dir, knock, lift, arrowId) => {
     if (arrowId && arrows[arrowId]) { arrows[arrowId].g.destroy(); delete arrows[arrowId]; }
+    if (victimId.startsWith('slime:')) { // um slime apanhou
+      const sl = slimes[victimId];
+      if (sl && currentMap === 'forest') { sl.hp = hp; sl.flash = 6; hitFx(sl.c.x, sl.c.y, dmg); sfxHurt(false); }
+      return;
+    }
     if (!isHere(victimId)) return;
     const v = arenaById[victimId];
     if (v) { v.hp = hp; updateArenaHud(); }
@@ -2402,11 +2514,17 @@ function setupArenaEvents() {
   });
 
   connection.on('ArenaKill', (killerId, victimId) => {
+    if (victimId.startsWith('slime:')) { // um slime foi derrotado
+      const sl = slimes[victimId];
+      if (sl && currentMap === 'forest') { deathFx(sl.c.x, sl.c.y, 0x4cd137); chip([660, 880, 1320, 1760], 0.04, 'square', 0.1); sl.c.setVisible(false); sl.dead = true; }
+      if (killerId === myId()) addChatLine(null, '🟢 Você derrotou um slime! (+5 pontos)', true);
+      return;
+    }
     if (!isHere(victimId)) return;
     const p = spritePos(victimId);
     if (p) deathFx(p.x, p.y);
     sfxDeath();
-    const kn = killerId === myId() ? 'Você' : remotePlayers[killerId]?.name || 'Alguém';
+    const kn = killerId === myId() ? 'Você' : killerId.startsWith('slime:') ? 'Um slime' : remotePlayers[killerId]?.name || 'Alguém';
     const vn = victimId === myId() ? 'você' : remotePlayers[victimId]?.name || 'alguém';
     addChatLine(null, `⚔️ ${kn} derrotou ${vn}!`, true);
   });
@@ -2429,12 +2547,17 @@ Object.assign(HELP, {
     '⚔️ Arena: ande até o fim da rua, à direita (onde está a placa), e segure → por um instante para entrar. Lá você luta com armas, ganha pontos e aparece no ranking.',
     'Dentro da arena, o botão ? mostra as instruções de combate. Para voltar, segure ← no começo da arena.',
   ],
+  floresta: [
+    '🌲 Floresta: ande até o fim da rua, à esquerda (onde está a placa), e segure ← por um instante. Tem música heroica e slimes 🟢 para derrotar.',
+    'Lá você tem vida (100), escolhe a arma com as teclas 1 a 5 e ataca com Espaço ou X, como na arena — mas os jogadores NÃO se machucam entre si, só os slimes. Slime derrotado dá +5 pontos e volta depois de um tempo.',
+    'Cuidado: encostar num slime tira vida. Se a vida acabar, você volta para a cidade principal depois de 3 segundos. Para voltar ao vilarejo, ande até o fim da floresta, à direita, e segure →. Dá para cumprimentar, dançar e subir nas costas de amigos lá também.',
+  ],
   dash: [
     '💨 Dash: toque duas vezes rápido na seta ← ou → para dar um pequeno impulso. Vale também no ar! Depois há uma pequena pausa antes de usar de novo.',
     'No celular, dois toques em ◀ ou ▶.',
   ],
 });
-HELP_GROUPS.push({ title: '💨 Movimento e arena', keys: ['dash', 'arena'] });
+HELP_GROUPS.push({ title: '💨 Movimento, floresta e arena', keys: ['dash', 'floresta', 'arena'] });
 
 function refreshHelpForMap() {
   const arena = currentMap === 'arena';
@@ -2448,4 +2571,52 @@ function refreshHelpForMap() {
   box.hidden = !arena;
   document.getElementById('helpGroups').hidden = arena;
   document.querySelector('#helpPanel h3 span').textContent = arena ? '❓ Ajuda: Arena' : '❓ Ajuda: comandos e controles';
+}
+
+
+// ======================= Slimes da floresta =======================
+// O servidor move e ataca os slimes (SlimeState a cada ~100 ms); aqui eles só são desenhados e suavizados.
+const slimes = {}; // id -> { c (contêiner), x, y (alvo), hp, max, dir, hop, flash }
+
+function makeSlimeSprite(scene) {
+  const g = scene.add.graphics();
+  g.fillStyle(0x000000, 0.25).fillEllipse(0, 0, 38, 8); // sombra no chão
+  g.fillStyle(0x2f9e2a, 1).fillEllipse(0, -13, 40, 28); // contorno escuro
+  g.fillStyle(0x56d64a, 1).fillEllipse(0, -13, 36, 25); // corpo
+  g.fillStyle(0xc9f7b5, 0.9).fillEllipse(-8, -20, 10, 6); // brilho
+  g.fillStyle(0xffffff, 1).fillEllipse(-7, -13, 9, 11).fillEllipse(7, -13, 9, 11); // olhos
+  g.fillStyle(0x16310f, 1).fillEllipse(-6, -12, 4, 6).fillEllipse(8, -12, 4, 6); // pupilas
+  g.lineStyle(2, 0x16310f, 1).beginPath().arc(0, -7, 5, 0.2, Math.PI - 0.2).strokePath(); // sorriso
+  return scene.add.container(0, 0, [g]).setDepth(0.5);
+}
+
+function syncSlimes(list) {
+  const seen = new Set();
+  for (const d of list) {
+    seen.add(d.id);
+    let sl = slimes[d.id];
+    if (!sl) {
+      if (!gameScene) continue;
+      sl = slimes[d.id] = { c: makeSlimeSprite(gameScene), hp: d.hp, max: d.max, flash: 0, dead: false };
+      sl.c.setPosition(d.x, d.y + 13);
+    }
+    if (sl.dead) { sl.dead = false; sl.c.setPosition(d.x, d.y + 13); } // voltou a viver
+    Object.assign(sl, { x: d.x, y: d.y, hp: d.hp, max: d.max, dir: d.dir, hop: d.hop });
+  }
+  for (const id in slimes) if (!seen.has(id)) { slimes[id].c.destroy(); delete slimes[id]; }
+}
+
+function updateSlimes() {
+  const forest = currentMap === 'forest';
+  const now = Date.now();
+  for (const sl of Object.values(slimes)) {
+    sl.c.setVisible(forest && !sl.dead);
+    if (!forest || sl.dead) continue;
+    sl.c.x += (sl.x - sl.c.x) * 0.4;
+    sl.c.y += (sl.y + 13 - sl.c.y) * 0.5;
+    const hopping = sl.hop > 1; // no ar: esticado; no chão: respira
+    sl.c.scaleX = (hopping ? 0.88 : 1 + Math.sin(now / 220) * 0.04) * (sl.dir || 1);
+    sl.c.scaleY = hopping ? 1.14 : 1 - Math.sin(now / 220) * 0.04;
+    if (sl.flash > 0) { sl.flash--; sl.c.setAlpha(sl.flash % 2 ? 0.45 : 1); } else sl.c.setAlpha(1);
+  }
 }

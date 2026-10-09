@@ -172,7 +172,7 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
     public async Task Greet()
     {
         if (!Players.TryGetValue(Context.ConnectionId, out var me) || !Allow(600)) return;
-        if (me.Map != "village") { await Say("Na arena não dá para cumprimentar. Volte ao vilarejo."); return; }
+        if (me.Map == ArenaGame.MapName) { await Say("Na arena não dá para cumprimentar. Volte ao vilarejo."); return; }
         var near = Nearest(me, 150, 110);
         if (near is null) { await Say("Ninguém por perto para cumprimentar. Chegue mais perto de um amigo."); return; }
 
@@ -203,7 +203,7 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
     public async Task Push()
     {
         if (!Players.TryGetValue(Context.ConnectionId, out var me) || !Allow(900)) return;
-        if (me.Map != "village") { await Say("Na arena, use as armas! Empurrar é só no vilarejo."); return; }
+        if (me.Map == ArenaGame.MapName) { await Say("Na arena, use as armas! Empurrar é só fora dela."); return; }
         if (me.RidingOn is not null) { await Say("Desça das costas do amigo antes de empurrar."); return; }
         var target = Nearest(me, 90, 80, p => p.RidingOn is null);
         if (target is null) { await Say("Ninguém ao alcance para empurrar. Chegue bem perto de um amigo."); return; }
@@ -220,7 +220,7 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
         if (!Players.TryGetValue(Context.ConnectionId, out var me) || !Allow(600)) return;
 
         if (me.RidingOn is not null) { await Dismount(me); return; }
-        if (me.Map != "village") { await Say("Subir nas costas só funciona no vilarejo."); return; }
+        if (me.Map == ArenaGame.MapName) { await Say("Subir nas costas não funciona na arena."); return; }
 
         var rider = Players.Values.FirstOrDefault(p => p.RidingOn == me.Id);
         if (rider is not null) { await Dismount(rider); return; }
@@ -277,7 +277,7 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
     public async Task SetDancing(bool on)
     {
         if (!Players.TryGetValue(Context.ConnectionId, out var me) || me.Dancing == on) return;
-        if (on && me.Map != "village") return; // na arena não se dança
+        if (on && me.Map == ArenaGame.MapName) return; // na arena não se dança
         me.Dancing = on;
 
         if (on)
@@ -301,30 +301,50 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
 
     // ---------- Mapas, arena e dash ----------
 
-    // Muda de mapa andando até a borda: vilarejo (borda direita) <-> arena (borda esquerda)
+    // Mapas ligados pelas bordas: floresta <- (esquerda) vilarejo (direita) -> arena. Devolve onde o jogador aparece no mapa novo.
+    private static bool TryTransition(Player me, string to, out float x, out string? hint)
+    {
+        x = 0; hint = null;
+        switch (me.Map, to)
+        {
+            case ("village", "forest"):
+                if (me.X > 120) { hint = "Ande até o fim da rua, à esquerda, para chegar à floresta."; return false; }
+                x = 1220; return true;
+            case ("village", ArenaGame.MapName):
+                if (me.X < 1280 - 120) { hint = "Ande até o fim da rua, à direita, para chegar à arena."; return false; }
+                x = ArenaGame.EntryX; return true;
+            case ("forest", "village"):
+                if (me.X < 1160) return false;
+                x = 60; return true;
+            case (ArenaGame.MapName, "village"):
+                if (me.X > 120) return false;
+                x = 1220; return true;
+        }
+        return false;
+    }
+
+    // Muda de mapa andando até a borda
     public async Task ChangeMap(string map)
     {
         if (!Players.TryGetValue(Context.ConnectionId, out var me)) return;
         var nowMs = Environment.TickCount64;
         if (LastMapAt.TryGetValue(me.Id, out var lastMap) && nowMs - lastMap < 500) return;
         LastMapAt[me.Id] = nowMs;
-        if (map != "village" && map != ArenaGame.MapName) return;
         if (me.Map == map) return;
-        if (map == ArenaGame.MapName && me.X < 1280 - 70) { await Say("Ande até o fim da rua, à direita, para chegar à arena."); return; }
-        if (map == "village" && me.X > 120) return;
+        if (!TryTransition(me, map, out var newX, out var hint)) { if (hint is not null) await Say(hint); return; }
         if (me.RidingOn is not null) { await Say("Desça das costas do amigo antes de mudar de mapa."); return; }
-        if (TagGame.IsParticipant(me.Id)) { await Say("Termine o pique-pega antes de ir para a arena."); return; }
+        if (TagGame.IsParticipant(me.Id)) { await Say("Termine o pique-pega antes de sair do vilarejo."); return; }
 
         foreach (var rider in Players.Values.Where(p => p.RidingOn == me.Id).ToList()) await Dismount(rider); // quem estava nas costas fica para trás
         if (me.Dancing) { me.Dancing = false; await StopDanceAccounting(me.Id); await Clients.Group(Room).SendAsync("PlayerDance", me.Id, false); }
 
-        var toArena = map == ArenaGame.MapName;
+        var toCombat = ArenaGame.IsCombatMap(map);
         me.Map = map;
-        me.X = toArena ? ArenaGame.EntryX : 1220;
+        me.X = newX;
         me.Y = ArenaGame.SpawnY;
-        if (toArena) await ArenaGame.Enter(hubContext, me.Id); else await ArenaGame.Leave(hubContext, me.Id);
+        if (toCombat) await ArenaGame.Enter(hubContext, me.Id, map); else await ArenaGame.Leave(hubContext, me.Id);
         await Clients.Group(Room).SendAsync("PlayerMap", me.Id, me.Map, me.X, me.Y);
-        if (toArena) await Clients.Caller.SendAsync("ArenaState", ArenaGame.Snapshot());
+        if (toCombat) await Clients.Caller.SendAsync("ArenaState", ArenaGame.Snapshot());
     }
 
     public Task SetWeapon(int weapon) =>
@@ -332,7 +352,7 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
 
     public async Task Attack(int dir)
     {
-        if (!Players.TryGetValue(Context.ConnectionId, out var me) || me.Map != ArenaGame.MapName) return;
+        if (!Players.TryGetValue(Context.ConnectionId, out var me) || !ArenaGame.IsCombatMap(me.Map)) return;
         await ArenaGame.Attack(hubContext, me, dir);
     }
 

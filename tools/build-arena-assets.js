@@ -2,6 +2,8 @@
 // Uso (uma vez, ou quando as imagens mudarem):  npm i pngjs  &&  node tools/build-arena-assets.js
 //   Arena.jpg          -> fundo_arena.jpg (cópia)
 //   Placa arena.png    -> placa_arena.png (sem margem, reduzida; se o fundo vier branco, ele é removido)
+//   Placa floresta.png -> placa_floresta.png (idem)
+//   Fundo Floresta.jpg -> fundo_floresta.jpg (cópia)
 //   Balao de texto.png -> balao.png + balao.json (pontas do pergaminho e margens do texto)
 const fs = require('fs'), path = require('path');
 const { PNG } = require('pngjs');
@@ -59,15 +61,17 @@ function cropScaled(p, [x0, y0, x1, y1], f) {
 // Fundo da arena
 fs.copyFileSync(path.join(SRC, 'Arena.jpg'), path.join(OUT, 'fundo_arena.jpg'));
 
-// Placa: aparece pequena no jogo (~58 px de altura); guardada em 2x para ficar nítida
-{
-  const p = read(path.join(SRC, 'Placa arena.png'));
+fs.copyFileSync(path.join(SRC, 'Fundo Floresta.jpg'), path.join(OUT, 'fundo_floresta.jpg'));
+
+// Placas: aparecem pequenas no jogo (~58 px de altura); guardadas em 2x para ficar nítidas
+for (const [src, dst] of [['Placa arena.png', 'placa_arena.png'], ['Placa floresta.png', 'placa_floresta.png']]) {
+  const p = read(path.join(SRC, src));
   keyOutWhiteBorder(p);
   const box = bbox(p);
   const f = 116 / (box[3] - box[1] + 1);
   const out = cropScaled(p, box, f);
-  write(out, 'placa_arena.png');
-  console.log('placa_arena.png', out.width + 'x' + out.height);
+  write(out, dst);
+  console.log(dst, out.width + 'x' + out.height);
 }
 
 // Balão de chat: pergaminho. As pontas (rolos) não esticam; só o meio.
