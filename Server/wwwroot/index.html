@@ -43,6 +43,28 @@
     #chatLog .who { font-weight: bold; color: #ffd966; }
     #chatLog .sys { color: #b9e6ff; font-style: italic; }
     #chatLog p.old { opacity: .45; }
+    #chatLog p.fading { opacity: 0 !important; } /* avisos do sistema somem depois de alguns segundos */
+    /* Botão de ajuda (canto inferior direito do jogo) e janela com os grupos de comandos */
+    #helpBtn { position: fixed; right: 12px; bottom: 12px; z-index: 6; width: 36px; height: 36px; padding: 0; border-radius: 50%;
+      border: 2px solid #fff9; background: rgba(0, 0, 0, .55); color: #fff; font-size: 20px; font-weight: bold; cursor: pointer; }
+    #helpBtn[hidden] { display: none; }
+    #helpModal { position: fixed; inset: 0; z-index: 45; background: rgba(0, 0, 0, .6); display: flex; align-items: center; justify-content: center; }
+    #helpModal[hidden] { display: none; }
+    #helpPanel { width: min(520px, 92vw); max-height: 82vh; overflow-y: auto; background: #1b2238; border: 1px solid #fff5;
+      border-radius: 12px; padding: 14px 16px; box-shadow: 0 0 30px #000a; }
+    #helpPanel h3 { margin: 0 0 8px; display: flex; justify-content: space-between; align-items: center; font-size: 18px; }
+    #helpClose { width: auto; padding: 2px 10px; background: none; border: none; color: #fff; font-size: 18px; cursor: pointer; }
+    #helpPanel details { border-top: 1px solid #fff2; padding: 6px 0; }
+    #helpPanel summary { cursor: pointer; font-weight: bold; font-size: 15px; padding: 4px 0; }
+    #helpPanel details > div { padding: 2px 0 6px 12px; font-size: 13px; line-height: 1.4; color: #dbe6f2; }
+    #helpPanel details > div p { margin: 4px 0; }
+    #helpPanel h4 { margin: 8px 0 2px; font-size: 13px; color: #ffd966; }
+    /* Dica de movimento no centro da tela ao entrar */
+    #moveHint { position: fixed; z-index: 6; transform: translate(-50%, -50%); padding: 12px 24px; background: rgba(0, 0, 0, .6);
+      border: 1px solid #fff8; border-radius: 16px; font-size: 20px; pointer-events: none; text-shadow: 1px 1px 2px #000;
+      white-space: nowrap; animation: hintPulse 1.6s ease-in-out infinite; }
+    #moveHint[hidden] { display: none; }
+    @keyframes hintPulse { 0%, 100% { opacity: 1; } 50% { opacity: .65; } }
     #chat.active #chatLog { background: rgba(0, 0, 0, .35); }
     #chat.active #chatLog p.old { opacity: 1; }
     #chatBar { margin-top: 4px; pointer-events: auto; }
@@ -143,6 +165,14 @@
   </div>
   <div id="emoteTray"></div>
   <div id="hud" hidden></div>
+  <div id="moveHint" hidden></div>
+  <button id="helpBtn" title="Ajuda: como usar os comandos" hidden>?</button>
+  <div id="helpModal" hidden>
+    <div id="helpPanel" role="dialog" aria-label="Ajuda">
+      <h3><span>❓ Ajuda: comandos e controles</span><button id="helpClose" title="Fechar">✕</button></h3>
+      <div id="helpGroups"></div>
+    </div>
+  </div>
   <div id="theater" hidden><video autoplay playsinline></video><div id="theaterCaption"></div></div>
   <div id="interactHint" hidden></div>
   <div id="rotate"><div style="font-size:64px">📱</div><div>Gire o celular para o modo paisagem para jogar</div></div>

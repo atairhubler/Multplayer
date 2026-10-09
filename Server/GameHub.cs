@@ -218,21 +218,50 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
         var rider = Players.Values.FirstOrDefault(p => p.RidingOn == me.Id);
         if (rider is not null) { await Dismount(rider); return; }
 
-        var carrier = Nearest(me, 100, 90, p => p.RidingOn is null && !Players.Values.Any(q => q.RidingOn == p.Id));
-        if (carrier is null) { await Say("Ninguém por perto para carregar você. Chegue perto de um amigo que não esteja carregando ninguém."); return; }
+        // Dá para subir em quem está no topo de uma torre: o carregador não pode ter ninguém nas costas e a torre tem limite de altura
+        var carrier = Players.Values
+            .Where(p => p.Id != me.Id && p.RidingOn != me.Id && TowerDepth(p) < MaxTower && !Players.Values.Any(q => q.RidingOn == p.Id))
+            .Select(p => (Carrier: p, Base: TowerBase(p)))
+            .Where(t => Math.Abs(t.Base.X - me.X) <= 100 && Math.Abs(t.Base.Y - me.Y) <= 90)
+            .OrderBy(t => Math.Abs(t.Base.X - me.X) + Math.Abs(t.Base.Y - me.Y))
+            .Select(t => t.Carrier)
+            .FirstOrDefault();
+        if (carrier is null) { await Say("Ninguém por perto para carregar você. Chegue perto de um amigo (ou de uma torre) que tenha espaço nas costas."); return; }
 
+        var bas = TowerBase(carrier);
+        me.X = bas.X;
+        me.Y = bas.Y;
         me.RidingOn = carrier.Id;
         if (me.Dancing) { me.Dancing = false; await Clients.Group(Room).SendAsync("PlayerDance", me.Id, false); }
-        await Clients.Group(Room).SendAsync("Riding", me.Id, carrier.Id, carrier.X, carrier.Y);
+        await Clients.Group(Room).SendAsync("Riding", me.Id, carrier.Id, bas.X, bas.Y);
         await Clients.Client(carrier.Id).SendAsync("SystemMessage", $"🐴 {me.Name} subiu nas suas costas! Aperte R para derrubar.");
+    }
+
+    // Torre de jogadores: até MaxTower pessoas empilhadas (a base conta). RidingOn aponta para quem está embaixo.
+    private const int MaxTower = 10;
+
+    // Quem está no chão no pé da torre (a posição X/Y de quem está montado fica velha, só a base se move)
+    private static Player TowerBase(Player p)
+    {
+        for (var i = 0; i < MaxTower + 2 && p.RidingOn is not null && Players.TryGetValue(p.RidingOn, out var below); i++) p = below;
+        return p;
+    }
+
+    // Quantas pessoas há da base até p, incluindo os dois (base sozinha = 1)
+    private static int TowerDepth(Player p)
+    {
+        var n = 1;
+        for (; n <= MaxTower + 2 && p.RidingOn is not null && Players.TryGetValue(p.RidingOn, out var below); n++) p = below;
+        return n;
     }
 
     private async Task Dismount(Player rider)
     {
         if (rider.RidingOn is not null && Players.TryGetValue(rider.RidingOn, out var carrier))
         {
-            rider.X = carrier.X;
-            rider.Y = carrier.Y;
+            var bas = TowerBase(carrier);
+            rider.X = bas.X;
+            rider.Y = bas.Y;
         }
         rider.RidingOn = null;
         await Clients.Group(Room).SendAsync("Riding", rider.Id, null, rider.X, rider.Y);
@@ -351,11 +380,12 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
         if (Players.TryRemove(id, out var gone))
         {
             // quem estava nas costas de quem saiu desce no lugar dele
+            var bas = TowerBase(gone);
             foreach (var rider in Players.Values.Where(p => p.RidingOn == id))
             {
                 rider.RidingOn = null;
-                rider.X = gone.X;
-                rider.Y = gone.Y;
+                rider.X = bas.X;
+                rider.Y = bas.Y;
                 await Clients.Group(Room).SendAsync("Riding", rider.Id, null, rider.X, rider.Y);
             }
             await Clients.OthersInGroup(Room).SendAsync("PlayerLeft", id);

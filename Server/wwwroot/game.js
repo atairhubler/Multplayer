@@ -236,8 +236,26 @@ const LABEL_STYLE = { fontSize: '14px', color: '#ffffff', stroke: '#000', stroke
 const myId = () => connection?.connectionId;
 const localInfo = { label: null, name: '', title: null, nameColor: '#ffffff' };
 const ridingMap = {}; // id de quem está montado -> id de quem carrega
+const RIDE_STEP = CHAR_H * 0.72; // quanto cada nível da torre sobe
+const TOWER_MAX = 10; // o servidor também limita a altura da torre
+// quantos níveis há de quem carrega `id` até a base (0 = está no chão)
+function chainDepth(id) {
+  let n = 0;
+  for (let c = ridingMap[id]; c && n <= TOWER_MAX; c = ridingMap[c]) n++;
+  return n;
+}
+// quantos jogadores há empilhados em cima de `id` (torre de jogadores)
+function levelsAbove(id) {
+  let n = 0;
+  for (let cur = id; n <= TOWER_MAX; n++) {
+    const up = Object.keys(ridingMap).find(r => ridingMap[r] === cur);
+    if (!up) break;
+    cur = up;
+  }
+  return n;
+}
 // quem está carregando alguém tem o nome e o balão mais acima, para não ficarem por cima de quem está nas costas
-const liftFor = id => (Object.values(ridingMap).includes(id) ? CHAR_H * 0.72 + 34 : 0);
+const liftFor = id => { const n = levelsAbove(id); return n ? n * (RIDE_STEP + 18) + 16 : 0; };
 
 const isIt = id => tagState.active && tagState.itId === id;
 
@@ -250,12 +268,13 @@ function refreshLabel(id) {
   info.label.setColor(it ? '#ff6b6b' : info.nameColor || '#ffffff');
 }
 const refreshAllLabels = () => { refreshLabel(myId()); Object.keys(remotePlayers).forEach(refreshLabel); };
+const LABEL_MIN_Y = LABEL_DY + 4; // em torres altas o nome não sai pela borda de cima da tela
 const placeLabel = (label, x, y) => label.setPosition(x, y - LABEL_DY + 9);
 
 function createRemote(scene, p, announce = false) {
   if (remotePlayers[p.id]) return;
   const rect = makeSprite(scene, p.characterSprite || 'red').setPosition(p.x, p.y);
-  if (announce) { addChatLine(null, p.name + ' entrou'); playChime(); }
+  if (announce) { addChatLine(null, p.name + ' entrou', true); playChime(); }
   const label = scene.add.text(p.x, p.y, p.name, LABEL_STYLE).setOrigin(0.5, 1);
   remotePlayers[p.id] = {
     rect, label, name: p.name, title: p.title || null, nameColor: p.nameColor || null,
@@ -360,7 +379,7 @@ function create() {
     if (r) { r.targetX = x; r.targetY = y; }
   });
   connection.on('PlayerEmote', (id, i) => showEmote(id, EMOTE_ICONS[i]));
-  connection.on('SystemMessage', text => String(text).split('\n').forEach(l => addChatLine(null, l)));
+  connection.on('SystemMessage', text => String(text).split('\n').forEach(l => addChatLine(null, l, true)));
   connection.on('PlayerProfile', (id, nameColor, title) => {
     const r = remotePlayers[id];
     if (!r) return;
@@ -378,7 +397,7 @@ function create() {
   connection.on('PlayerLeft', id => {
     const r = remotePlayers[id];
     if (!r) return;
-    addChatLine(null, r.name + ' saiu');
+    addChatLine(null, r.name + ' saiu', true);
     r.rect.destroy();
     r.label.destroy();
     delete remotePlayers[id];
@@ -400,6 +419,7 @@ function update(time, delta) {
   const left = (!typing && cursors.left.isDown) || touch.left;
   const right = (!typing && cursors.right.isDown) || touch.right;
   const jump = (!typing && cursors.up.isDown) || touch.jump;
+  if (!moveHintDone && (left || right || jump)) hideMoveHint();
   const carrierId = ridingMap[myId()];
   const carrier = carrierId && remotePlayers[carrierId];
 
@@ -426,7 +446,8 @@ function update(time, delta) {
     localSprite.animate?.(Math.abs(vx) > 10, !body.blocked.down, vx, delta, localDancing);
   }
   if (!localSprite.animate && localSprite.setAngle) localSprite.angle = localDancing ? Math.sin(Date.now() / 150) * 10 : 0;
-  placeLabel(nameLabel, localSprite.x, localSprite.y - liftFor(myId()));
+  localSprite.setDepth(carrier ? 1 + chainDepth(myId()) : 0);
+  placeLabel(nameLabel, localSprite.x, Math.max(localSprite.y - liftFor(myId()), LABEL_MIN_Y));
 
   // Envia posição só se mudou, com throttle
   if (!carrier && time - lastSent > SEND_INTERVAL_MS &&
@@ -438,12 +459,14 @@ function update(time, delta) {
   updateBubbles(time);
 
   // Remotos: interpolação suave, ou posição presa ao carregador quando estão nas costas de alguém
-  for (const id in remotePlayers) {
+  // (da base da torre para o topo, para cada um já achar o carregador na posição deste quadro)
+  for (const id of Object.keys(remotePlayers).sort((a, b) => chainDepth(a) - chainDepth(b))) {
     const r = remotePlayers[id];
     const cId = ridingMap[id];
-    const src = cId === myId() ? player : remotePlayers[cId]?.rect;
+    const src = cId === myId() ? localSprite : remotePlayers[cId]?.rect;
+    r.rect.setDepth(cId ? 1 + chainDepth(id) : 0);
     if (cId && src) {
-      r.rect.setPosition(src.x, src.y - CHAR_H * 0.72);
+      r.rect.setPosition(src.x, src.y - RIDE_STEP);
       r.targetX = src.x; r.targetY = src.y;
       r.rect.animate?.(false, false, 0, delta, false);
     } else {
@@ -453,9 +476,10 @@ function update(time, delta) {
       r.rect.animate?.(Math.abs(dx) > 0.8, Math.abs(dy) > 2, dx, delta, r.dancing);
     }
     if (!r.rect.animate && r.rect.setAngle) r.rect.angle = r.dancing ? Math.sin(Date.now() / 150) * 10 : 0;
-    placeLabel(r.label, r.rect.x, r.rect.y - liftFor(id));
+    placeLabel(r.label, r.rect.x, Math.max(r.rect.y - liftFor(id), LABEL_MIN_Y));
   }
   updateInteractHint(carrier);
+  updateTagFlash();
   updateGifs();
   updateProjections();
   positionChat();
@@ -481,7 +505,9 @@ const chatLog = document.getElementById('chatLog');
 const OLD_AFTER_MS = 12000; // linhas antigas ficam mais apagadas, como em chats de MMORPG
 
 // Usa textContent (nunca innerHTML) para que mensagens não injetem HTML
-function addChatLine(name, text) {
+// Avisos automáticos do sistema (entrou, bebeu água...) somem sozinhos para não empurrar as conversas: temp = true
+const SYS_LIFETIME_MS = 3000;
+function addChatLine(name, text, temp = false) {
   const p = document.createElement('p');
   if (name === null) {
     p.className = 'sys';
@@ -497,7 +523,24 @@ function addChatLine(name, text) {
   chatLog.appendChild(p);
   while (chatLog.children.length > 300) chatLog.firstChild.remove();
   if (stick) chatLog.scrollTop = chatLog.scrollHeight;
-  setTimeout(() => p.classList.add('old'), OLD_AFTER_MS);
+  if (temp && name === null) {
+    setTimeout(() => p.classList.add('fading'), SYS_LIFETIME_MS);
+    setTimeout(() => p.remove(), SYS_LIFETIME_MS + 1100);
+  } else setTimeout(() => p.classList.add('old'), OLD_AFTER_MS);
+}
+
+// Dica de movimento: aparece no centro ao entrar e some assim que o jogador começar a andar
+const moveHint = document.getElementById('moveHint');
+const helpBtn = document.getElementById('helpBtn');
+let moveHintDone = false;
+function showMoveHint() {
+  if (moveHintDone) return;
+  moveHint.textContent = coarsePointer ? 'Use os botões ◀ ▶ para andar' : 'Use as setas ← → para andar (↑ para pular)';
+  moveHint.hidden = false;
+}
+function hideMoveHint() {
+  moveHintDone = true;
+  moveHint.hidden = true;
 }
 
 // Mantém o chat DENTRO da área do jogo (canvas), mesmo quando há faixas pretas ao redor
@@ -510,6 +553,10 @@ function positionChat() {
   hudEl.style.left = interactHint.style.left = r.left + r.width / 2 + 'px';
   hudEl.style.top = r.top + 8 + 'px';
   interactHint.style.top = r.top + 44 + 'px';
+  moveHint.style.left = r.left + r.width / 2 + 'px';
+  moveHint.style.top = r.top + r.height / 2 + 'px';
+  helpBtn.style.right = innerWidth - r.right + 12 + 'px';
+  helpBtn.style.bottom = innerHeight - r.bottom + (coarsePointer ? 108 : 12) + 'px'; // no celular fica acima dos botões de toque
   chatEl.style.left = r.left + 12 + 'px';
   chatEl.style.width = Math.min(coarsePointer ? 250 : 360, r.width * 0.45) + 'px';
   chatLog.style.maxHeight = r.height * (coarsePointer ? 0.4 : 0.5) + 'px'; // até a metade do jogo
@@ -528,12 +575,18 @@ function setupChat() {
   if (coarsePointer) onlineEl.classList.add('closed'); // no celular começa recolhido
   renderOnline();
   connection.on('ChatHistory', list => list.forEach(m => addChatLine(m.name, m.text)));
-  connection.on('ChatMessage', m => { addChatLine(m.name, m.text); showBubble(m.id, m.text); });
+  connection.on('ChatMessage', m => {
+    addChatLine(m.name, m.text);
+    showBubble(m.id, m.text);
+    if (m.id !== myId()) playPing();
+  });
   setupVoiceEvents();
   setupShareEvents();
+  setupHelp();
   chatReady = true;
   // depois do histórico, que chega logo ao entrar
-  setTimeout(() => addChatLine(null, `👋 Bem-vindo, ${myName}! Digite /comandos para ver tudo que você pode fazer.`), 700);
+  setTimeout(() => addChatLine(null, `👋 Bem-vindo, ${myName}! Digite /comandos para ver tudo que você pode fazer.`, true), 700);
+  showMoveHint();
 }
 
 // Enter abre a caixa de mensagem na parte inferior; Enter de novo envia e fecha; Esc cancela
@@ -711,7 +764,36 @@ function createDoll(scene, config) {
     rig.y += (bob - rig.y) * k;
     rig.rotation += (sway - rig.rotation) * k;
   };
+  doll.setRedFlash = on => {
+    for (const [id, img] of Object.entries(part)) {
+      if (on) img.setTintFill(0xff0000);
+      else if (id.endsWith('Far')) img.setTint(0xc8c8c8); // volta ao tom mais escuro dos membros de trás
+      else img.clearTint();
+    }
+  };
   return doll;
+}
+
+// Pegador do pique-pega: o corpo inteiro pisca em vermelho (boneco, imagem estática ou GIF)
+const RED_FILTER = 'brightness(0) saturate(100%) invert(15%) sepia(100%) saturate(7500%) hue-rotate(-8deg)';
+function setRedFlash(sprite, on) {
+  if (!sprite) return;
+  if (sprite.setRedFlash) return sprite.setRedFlash(on);
+  for (const g of gifSprites) if (g.sprite === sprite) { g.img.style.filter = on ? RED_FILTER : ''; return; }
+  if (on) sprite.setTintFill(0xff0000); else sprite.clearTint();
+}
+const flashState = {}; // id -> último estado aplicado (só mexe no sprite quando muda)
+function updateTagFlash() {
+  const phaseOn = Math.floor(Date.now() / 125) % 2 === 0;
+  const apply = (id, sprite) => {
+    const on = isIt(id) && phaseOn;
+    if (!!flashState[id] === on) return;
+    flashState[id] = on;
+    setRedFlash(sprite, on);
+  };
+  apply(myId(), localSprite);
+  for (const id in remotePlayers) apply(id, remotePlayers[id].rect);
+  for (const id in flashState) if (id !== myId() && !remotePlayers[id]) delete flashState[id];
 }
 
 // ---- Lembrar nome e aparência neste navegador ----
@@ -878,6 +960,71 @@ function startMusic() {
   loop();
 }
 
+// ---- Música animada enquanto alguém dança (sintetizada, ~124 bpm) ----
+// Enquanto houver dança: a música calma abaixa e entra uma batida alegre (bumbo, chimbal, baixo e melodia pentatônica).
+const DANCE_BPM = 124, DANCE_STEP_S = 60 / DANCE_BPM / 2; // colcheias
+const DANCE_BASS = [45, 45, 52, 45, 48, 48, 55, 48]; // Lá, Lá, Mi, Lá | Dó, Dó, Sol, Dó (uma nota por colcheia)
+const DANCE_PENTA = [69, 72, 74, 76, 79, 81]; // Lá menor pentatônica
+const DANCE_MELODY = [0, -1, 2, 3, -1, 4, 3, 2, 1, -1, 3, 4, 5, 4, 2, -1]; // índice em DANCE_PENTA (-1 = pausa)
+const danceMusic = { timer: null, step: 0, nextAt: 0, on: false, noise: null };
+
+function danceTone(freq, t, dur, type, gain) {
+  const ctx = music.ctx, osc = ctx.createOscillator(), g = ctx.createGain();
+  osc.type = type; osc.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.linearRampToValueAtTime(gain, t + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  osc.connect(g); g.connect(music.master);
+  osc.start(t); osc.stop(t + dur + 0.05);
+}
+
+function danceStep(t, i) {
+  const ctx = music.ctx, s = i % 16;
+  if (s % 4 === 0) { // bumbo a cada tempo
+    const osc = ctx.createOscillator(), g = ctx.createGain();
+    osc.frequency.setValueAtTime(150, t); osc.frequency.exponentialRampToValueAtTime(45, t + 0.14);
+    g.gain.setValueAtTime(0.55, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+    osc.connect(g); g.connect(music.master); osc.start(t); osc.stop(t + 0.22);
+  }
+  if (s % 2 === 1) { // chimbal nos contratempos
+    if (!danceMusic.noise) {
+      const buf = ctx.createBuffer(1, ctx.sampleRate * 0.1, ctx.sampleRate), d = buf.getChannelData(0);
+      for (let k = 0; k < d.length; k++) d[k] = Math.random() * 2 - 1;
+      danceMusic.noise = buf;
+    }
+    const src = ctx.createBufferSource(), hp = ctx.createBiquadFilter(), g = ctx.createGain();
+    src.buffer = danceMusic.noise; hp.type = 'highpass'; hp.frequency.value = 7000;
+    g.gain.setValueAtTime(0.12, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
+    src.connect(hp); hp.connect(g); g.connect(music.master); src.start(t); src.stop(t + 0.1);
+  }
+  danceTone(midiFreq(DANCE_BASS[Math.floor(i / 2) % DANCE_BASS.length] + (s % 2 ? 12 : 0)), t, DANCE_STEP_S * 0.9, 'triangle', 0.16);
+  const m = DANCE_MELODY[s];
+  if (m >= 0) danceTone(midiFreq(DANCE_PENTA[m]), t, DANCE_STEP_S * 1.6, 'square', 0.05);
+}
+
+function danceLoop() {
+  const ctx = music.ctx;
+  if (!danceMusic.on || !ctx) return;
+  if (ctx.state === 'running') {
+    if (danceMusic.nextAt < ctx.currentTime) danceMusic.nextAt = ctx.currentTime + 0.05;
+    while (danceMusic.nextAt < ctx.currentTime + 0.3) { // agenda um pouco à frente
+      danceStep(danceMusic.nextAt, danceMusic.step++);
+      danceMusic.nextAt += DANCE_STEP_S;
+    }
+  }
+  danceMusic.timer = setTimeout(danceLoop, 80);
+}
+
+function setDanceMusic(on) {
+  if (danceMusic.on === on || !music.ctx) return;
+  danceMusic.on = on;
+  if (music.bus) music.bus.gain.setTargetAtTime(on ? 0.12 : 1, music.ctx.currentTime, 0.4);
+  if (on) { danceMusic.step = 0; danceMusic.nextAt = 0; danceLoop(); }
+  else { clearTimeout(danceMusic.timer); danceMusic.timer = null; }
+}
+const anyoneDancing = () => localDancing || Object.values(remotePlayers).some(r => r.dancing);
+setInterval(() => setDanceMusic(anyoneDancing()), 400);
+
 muteBtn.addEventListener('click', () => {
   music.muted = !music.muted;
   muteBtn.textContent = music.muted ? '🔇' : '🔊';
@@ -995,6 +1142,23 @@ function playChime() {
   });
 }
 
+// Plim discreto quando chega mensagem de um amigo no chat
+let lastPing = 0;
+function playPing() {
+  if (!music.ctx || !music.sfx || music.muted || music.ctx.state !== 'running') return;
+  const now = Date.now();
+  if (now - lastPing < 150) return; // várias mensagens juntas não viram uma rajada de sons
+  lastPing = now;
+  const t0 = music.ctx.currentTime;
+  const osc = music.ctx.createOscillator(), g = music.ctx.createGain();
+  osc.type = 'triangle'; osc.frequency.setValueAtTime(1046.5, t0); osc.frequency.exponentialRampToValueAtTime(1568, t0 + 0.08);
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.linearRampToValueAtTime(0.16, t0 + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.28);
+  osc.connect(g); g.connect(music.sfx);
+  osc.start(t0); osc.stop(t0 + 0.3);
+}
+
 // ---- Comandos do chat: /comandos e a ajuda de cada um ----
 const HELP = {
   emote: [
@@ -1011,6 +1175,7 @@ const HELP = {
   ],
   subir: [
     '🐴 Subir nas costas: chegue perto de um amigo e aperte R (celular: botão 😀 e depois 🐴). Você vai junto com ele.',
+    'Dá para formar uma torre: outro amigo pode subir em você, e outro nele, até 10 jogadores empilhados!',
     'Para descer, aperte R de novo ou pule. Quem está carregando também pode apertar R para derrubar quem está nas costas.',
   ],
   danca: [
@@ -1019,7 +1184,7 @@ const HELP = {
   ],
   pique: [
     '🏃 Pique-pega: digite /pique iniciar para começar (mínimo de 2 jogadores, dura 90 segundos). /pique parar encerra.',
-    'O pegador fica em vermelho 🔴: encoste em alguém para passar a vez (quem foi pego tem 2 segundos de proteção).',
+    'O pegador fica piscando todo em vermelho 🔴: encoste em alguém para passar a vez (quem foi pego tem 2 segundos de proteção).',
     'Vence quem ficar menos tempo como pegador e ganha o título "Campeão do Pique-Pega". Quem está nas costas de alguém não pode ser pego.',
   ],
   vilarejo: [
@@ -1046,6 +1211,50 @@ const ALIASES = {
   interagir: 'vilarejo', projecao: 'compartilhar', tela: 'compartilhar', cumprimento: 'cumprimentar', empurrao: 'empurrar', titulos: 'titulo',
 };
 const say = lines => lines.forEach(l => addChatLine(null, l));
+
+// ---- Janela de ajuda (botão ? no canto inferior direito): grupos que expandem com as orientações ----
+const HELP_GROUPS = [
+  { title: '🤝 Ações sociais', keys: ['emote', 'cumprimentar', 'empurrar', 'subir', 'danca'] },
+  { title: '🏃 Jogos e vilarejo', keys: ['pique', 'vilarejo'] },
+  { title: '🎧 Voz e tela', keys: ['voz', 'compartilhar'] },
+  { title: '🎨 Perfil', keys: ['titulo', 'cor'] },
+];
+const HELP_EXTRA = {
+  titulo: [
+    '🏷️ Títulos: digite /titulo para ver os que você conquistou, /titulo 1 para equipar o primeiro e /titulo nenhum para tirar.',
+    'Conquiste jogando: vença o pique-pega, cumprimente 5 vezes ou dance por 90 segundos.',
+  ],
+};
+const helpModal = document.getElementById('helpModal');
+function setupHelp() {
+  const box = document.getElementById('helpGroups');
+  const intro = document.createElement('p');
+  intro.textContent = '🎮 Andar: setas ← → · Pular: ↑ · Chat: Enter (comandos começam com /). Toque num grupo para ver como usar.';
+  box.appendChild(intro);
+  for (const g of HELP_GROUPS) {
+    const det = document.createElement('details');
+    const sum = document.createElement('summary');
+    sum.textContent = g.title;
+    const body = document.createElement('div');
+    for (const k of g.keys) {
+      const h = document.createElement('h4');
+      h.textContent = '/' + k;
+      body.appendChild(h);
+      for (const line of HELP[k] || HELP_EXTRA[k] || []) {
+        const p = document.createElement('p');
+        p.textContent = line;
+        body.appendChild(p);
+      }
+    }
+    det.append(sum, body);
+    box.appendChild(det);
+  }
+  helpBtn.hidden = false;
+  helpBtn.addEventListener('click', () => { helpModal.hidden = !helpModal.hidden; });
+  document.getElementById('helpClose').addEventListener('click', () => { helpModal.hidden = true; });
+  helpModal.addEventListener('click', e => { if (e.target === helpModal) helpModal.hidden = true; });
+  window.addEventListener('keydown', e => { if (e.key === 'Escape' && !helpModal.hidden) helpModal.hidden = true; });
+}
 
 function runCommand(text) {
   const [raw, ...args] = text.slice(1).trim().split(/\s+/);
@@ -1117,7 +1326,7 @@ function colorCommand(arg) {
 // ---- Atalhos de teclado (PC) e botões na bandeja (celular) ----
 const KEY_ACTIONS = { h: doGreet, q: doPush, r: doRide, g: doDance, e: doInteract };
 window.addEventListener('keydown', e => {
-  if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || !chatReady || !chatBar.hidden) return;
+  if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || !chatReady || !chatBar.hidden || !helpModal.hidden) return;
   KEY_ACTIONS[e.key.toLowerCase()]?.();
 });
 [['🤝', 'Cumprimentar', doGreet], ['💢', 'Empurrar', doPush], ['🐴', 'Subir ou descer das costas', doRide],
@@ -1156,7 +1365,8 @@ const sendSignal = (id, obj) => connection.invoke('VoiceSignal', id, JSON.string
 function createPeer(id) {
   if (voice.peers[id]) return voice.peers[id];
   const pc = new RTCPeerConnection({ iceServers: VOICE_ICE_SERVERS });
-  const peer = { pc, audio: null, pending: [] };
+  // queue: os sinais de cada par são tratados um de cada vez (offer/answer/ICE chegam em sequência, mas o processamento é assíncrono)
+  const peer = { pc, audio: null, pending: [], queue: Promise.resolve(), initiator: false, restarts: 0 };
   voice.peers[id] = peer;
   voice.stream.getTracks().forEach(t => pc.addTrack(t, voice.stream));
   pc.onicecandidate = e => { if (e.candidate) sendSignal(id, { candidate: e.candidate }); };
@@ -1171,13 +1381,36 @@ function createPeer(id) {
     watchLevel(id, e.streams[0]);
   };
   pc.onconnectionstatechange = () => {
-    if (pc.connectionState === 'failed' && voice.peers[id] === peer) {
-      const name = remotePlayers[id]?.name || 'um amigo';
-      say([`⚠️ Não consegui conectar a voz com ${name}. A rede dessa pessoa pode estar bloqueando conexões diretas (é comum em dados móveis).`]);
-      closePeer(id);
+    console.info(`[voz] ${remotePlayers[id]?.name || id}: ${pc.connectionState}`); // ajuda a descobrir qual par não conecta
+    if (voice.peers[id] !== peer) return;
+    if (pc.connectionState === 'connected') { peer.restarts = 0; peer.audio?.play().catch(() => {}); }
+    if (pc.connectionState === 'disconnected') setTimeout(() => { if (voice.peers[id] === peer && pc.connectionState === 'disconnected') restartPeer(id); }, 4000);
+    if (pc.connectionState === 'failed') {
+      if (peer.restarts < 2 && restartPeer(id)) return; // quem ligou tenta de novo (reinício do ICE) antes de desistir
+      if (peer.initiator || peer.restarts >= 2) {
+        const name = remotePlayers[id]?.name || 'um amigo';
+        say([`⚠️ Não consegui conectar a voz com ${name}. A rede dessa pessoa pode estar bloqueando conexões diretas (é comum em dados móveis).`]);
+        closePeer(id);
+      }
     }
   };
+  // se o par não conectar em 15 s (sinal perdido), recomeça a ligação uma vez
+  setTimeout(() => {
+    if (voice.peers[id] === peer && pc.connectionState !== 'connected' && peer.restarts < 1) restartPeer(id);
+  }, 15000);
   return peer;
+}
+
+// Só quem ligou originalmente reinicia a conexão (evita os dois oferecerem ao mesmo tempo)
+function restartPeer(id) {
+  const peer = voice.peers[id];
+  if (!peer || !peer.initiator || !voice.on || peer.pc.signalingState !== 'stable') return false;
+  peer.restarts++;
+  peer.queue = peer.queue.then(async () => {
+    await peer.pc.setLocalDescription(await peer.pc.createOffer({ iceRestart: true }));
+    sendSignal(id, { sdp: peer.pc.localDescription });
+  }).catch(() => {});
+  return true;
 }
 
 function closePeer(id) {
@@ -1187,30 +1420,40 @@ function closePeer(id) {
 }
 
 async function callPeer(id) { // quem acabou de entrar na voz inicia a conexão
-  const { pc } = createPeer(id);
+  const peer = createPeer(id);
+  peer.initiator = true;
+  const { pc } = peer;
   await pc.setLocalDescription(await pc.createOffer());
   sendSignal(id, { sdp: pc.localDescription });
 }
 
-async function handleVoiceSignal(from, payload) {
+function handleVoiceSignal(from, payload) {
   if (!voice.on) return;
   let msg;
   try { msg = JSON.parse(payload); } catch { return; }
-  try {
-    const peer = createPeer(from);
-    const { pc } = peer;
-    if (msg.sdp) {
-      await pc.setRemoteDescription(msg.sdp);
-      for (const c of peer.pending.splice(0)) await pc.addIceCandidate(c).catch(() => {});
-      if (msg.sdp.type === 'offer') {
-        await pc.setLocalDescription(await pc.createAnswer());
-        sendSignal(from, { sdp: pc.localDescription });
-      }
-    } else if (msg.candidate) {
-      if (pc.remoteDescription) await pc.addIceCandidate(msg.candidate).catch(() => {});
-      else peer.pending.push(msg.candidate); // chegou antes da oferta/resposta: guarda
+  const peer = createPeer(from);
+  peer.queue = peer.queue.then(() => processVoiceSignal(from, peer, msg)).catch(() => { /* mensagem inválida ou fora de ordem: ignora */ });
+}
+
+async function processVoiceSignal(from, peer, msg) {
+  const { pc } = peer;
+  if (msg.sdp) {
+    // ofertas cruzadas (os dois ligaram ao mesmo tempo): o de menor id mantém a sua oferta; o outro desiste da dele e atende
+    if (msg.sdp.type === 'offer' && pc.signalingState !== 'stable') {
+      if (myId() < from) return;
+      await pc.setLocalDescription({ type: 'rollback' });
+      peer.initiator = false;
     }
-  } catch { /* mensagem inválida ou fora de ordem: ignora */ }
+    await pc.setRemoteDescription(msg.sdp);
+    for (const c of peer.pending.splice(0)) await pc.addIceCandidate(c).catch(() => {});
+    if (msg.sdp.type === 'offer') {
+      await pc.setLocalDescription(await pc.createAnswer());
+      sendSignal(from, { sdp: pc.localDescription });
+    }
+  } else if (msg.candidate) {
+    if (pc.remoteDescription) await pc.addIceCandidate(msg.candidate).catch(() => {});
+    else peer.pending.push(msg.candidate); // chegou antes da oferta/resposta: guarda
+  }
 }
 
 // ---- Quem está falando (🎙️) e volume por distância ----

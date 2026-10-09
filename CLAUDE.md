@@ -43,9 +43,13 @@ Personagens/        arte-fonte enviada pelo dono (Homem/, Mulher/, background/, 
 - **Fundo por horário (relógio local do jogador):** 10h–14h59 → fundo 10h; 15h–17h59 → 15h; 18h–9h59 → 18h.
 - **Chat estilo MMORPG:** canto inferior esquerdo, transparente, rolável, **dentro do canvas** (posicionado com `positionChat()`; no celular vai para o topo). Enter abre a caixa; Enter envia; Esc cancela. Mensagens que começam com `/` são comandos (`runCommand`). Sempre usar `textContent` (nunca `innerHTML`) para texto de usuários.
 - **Controles:** setas (e botões de toque no celular), emotes 1–6, **H** cumprimentar, **Q** empurrar, **R** subir/descer das costas, **G** dançar, **E** interagir. No celular a bandeja 😀 reúne as ações. Modo paisagem obrigatório no celular (aviso + tela cheia/lock onde o navegador deixa).
-- **Música ambiente:** gerada por WebAudio (sem arquivos), muda com o período do dia; `MUSIC_VOLUME` = 0.125; botão 🔊.
+- **Ajuda (?):** botão no canto inferior direito abre uma janela com grupos expansíveis (`HELP_GROUPS`, reaproveita o objeto `HELP`). **Dica de movimento** no centro ao entrar (some ao andar).
+- **Avisos do sistema** no chat (entrou, bebeu água...) somem em ~3 s (`addChatLine(null, texto, true)`); respostas de comandos (`say`) ficam. Mensagem de outro jogador toca `playPing()`.
+- **Torre:** dá para subir no topo de quem já carrega alguém, até 10 empilhados (`MaxTower` no servidor, `TOWER_MAX`/`chainDepth` no cliente).
+- **Pique-pega:** o pegador pisca todo em vermelho (`updateTagFlash`, boneco/imagem/GIF).
+- **Música ambiente:** gerada por WebAudio (sem arquivos), muda com o período do dia; enquanto alguém dança entra uma batida alegre (`setDanceMusic`) e a ambiente abaixa; `MUSIC_VOLUME` = 0.125; botão 🔊.
 - **Social:** títulos (Campeão do Pique-Pega, Cumprimentador, Dançarino) guardados no navegador; cor do nome; lista de online; aviso sonoro quando alguém entra.
-- **Chat de voz (WebRTC em malha):** botões 🎧 (entrar/sair) e 🎤 (mutar). STUN do Google em `VOICE_ICE_SERVERS` (sem TURN). Quem entra liga para quem já estava. Volume cai com a distância; 🎙️ no nome de quem fala.
+- **Chat de voz (WebRTC em malha):** botões 🎧 (entrar/sair) e 🎤 (mutar). STUN do Google em `VOICE_ICE_SERVERS` (sem TURN). Quem entra liga para quem já estava. Sinais por par são serializados, há tratamento de ofertas cruzadas e reinício de ICE; estados aparecem no console (`[voz]`). Volume cai com a distância; 🎙️ no nome de quem fala.
 - **Projeção (`/compartilhar`):** `getDisplayMedia` → moldura arcana (`assets/projecao.png`) sobre a cabeça. Os outros veem a moldura vazia e só assistem ao chegar perto e interagir (E/toque); de novo, ou clique, amplia ("teatro"). Sai da faixa de 720 px → para de receber. Só computador compartilha.
 
 ## Protocolo SignalR (resumo)
@@ -86,5 +90,6 @@ IDs de emote: 0–5 teclado; 6🖐️ 7🤝 8💢 9🎵; 20–26 pontos do vilar
 
 ## Pendências conhecidas / não verificado em ambiente real
 - Voz e compartilhamento foram testados só com mídia sintética (conexão WebRTC e vídeo funcionaram entre duas abas); falta teste com microfone/tela reais, 3+ pessoas e celular/dados móveis.
+- Bug relatado: com 3 pessoas, B e C não se ouviam (A ouvia os dois). Em teste local com 3 abas as 3 conexões fecham; a causa real deve ser NAT sem TURN (ex.: duas redes móveis). Se continuar, configurar um TURN em `VOICE_ICE_SERVERS`.
 - Indicador 🎙️ (quem fala) não foi confirmado visualmente.
 - Som (música, aviso de entrada) não foi ouvido nos testes automáticos.
