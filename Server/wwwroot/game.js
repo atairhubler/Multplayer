@@ -682,7 +682,7 @@ let lastEmoteAt = 0;
 function showEmote(id, emoji) {
   if (!gameScene || !emoji) return;
   bubbles[id]?.text.destroy();
-  const text = gameScene.add.text(0, 0, emoji, { fontSize: '34px' }).setOrigin(0.5, 1).setDepth(10);
+  const text = gameScene.add.text(0, 0, emoji, { fontSize: '34px', fontFamily: '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif', padding: { x: 4, top: 10, bottom: 6 } }).setOrigin(0.5, 1).setDepth(10);
   bubbles[id] = { text, expires: gameScene.time.now + 2500 };
 }
 
