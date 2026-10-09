@@ -59,6 +59,29 @@
     #helpPanel details > div { padding: 2px 0 6px 12px; font-size: 13px; line-height: 1.4; color: #dbe6f2; }
     #helpPanel details > div p { margin: 4px 0; }
     #helpPanel h4 { margin: 8px 0 2px; font-size: 13px; color: #ffd966; }
+    /* Arena: ranking (canto superior esquerdo), vida e armas (embaixo, ao centro) */
+    #arenaRank, #arenaBar, #arenaMsg { position: fixed; z-index: 6; text-shadow: 1px 1px 2px #000; }
+    #arenaRank[hidden], #arenaBar[hidden], #arenaMsg[hidden] { display: none; }
+    #arenaRank { min-width: 150px; max-width: 220px; background: rgba(0, 0, 0, .5); border: 1px solid #fff5; border-radius: 10px;
+      padding: 6px 10px; font-size: 13px; pointer-events: none; }
+    #arenaRank h4 { margin: 0 0 4px; font-size: 13px; color: #ffd966; }
+    #arenaRank ol { margin: 0; padding: 0; list-style: none; }
+    #arenaRank li { display: flex; justify-content: space-between; gap: 10px; padding: 1px 0; white-space: nowrap; }
+    #arenaRank li span:first-child { overflow: hidden; text-overflow: ellipsis; }
+    #arenaRank li.me { color: #ffd966; font-weight: bold; }
+    #arenaBar { transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
+    #arenaHp { width: 220px; height: 16px; background: #0009; border: 2px solid #fff9; border-radius: 9px; overflow: hidden; position: relative; }
+    #arenaHpFill { height: 100%; width: 100%; background: linear-gradient(#5fe36b, #2aa638); transition: width .15s; }
+    #arenaHpText { position: absolute; inset: 0; text-align: center; font-size: 11px; line-height: 16px; font-weight: bold; }
+    #arenaWeapons { display: flex; gap: 6px; pointer-events: auto; }
+    #arenaWeapons button { width: 44px; height: 44px; font-size: 22px; padding: 0; border-radius: 10px; border: 2px solid #fff6;
+      background: rgba(0, 0, 0, .55); color: #fff; cursor: pointer; position: relative; }
+    #arenaWeapons button.sel { border-color: #ffd966; background: rgba(120, 80, 0, .75); transform: translateY(-4px); }
+    #arenaWeapons button small { position: absolute; left: 3px; top: 0; font-size: 10px; color: #ffd966; }
+    #arenaMsg { transform: translate(-50%, -50%); padding: 10px 22px; background: rgba(0, 0, 0, .65); border: 1px solid #fff8;
+      border-radius: 14px; font-size: 20px; pointer-events: none; white-space: nowrap; }
+    #attackBtn { display: none; }
+    body.inArena #attackBtn { display: block; }
     /* Dica de movimento no centro da tela ao entrar */
     #moveHint { position: fixed; z-index: 6; transform: translate(-50%, -50%); padding: 12px 24px; background: rgba(0, 0, 0, .6);
       border: 1px solid #fff8; border-radius: 16px; font-size: 20px; pointer-events: none; text-shadow: 1px 1px 2px #000;
@@ -108,7 +131,7 @@
     #emoteTray.open { display: flex; }
     #emoteTray button { width: 48px; height: 48px; font-size: 26px; border-radius: 50%; padding: 0; }
     .grp.mid { align-items: flex-end; }
-    #talkBtn, #emoteBtn { width: 56px !important; height: 56px !important; font-size: 24px !important; align-self: flex-end; }
+    #talkBtn, #emoteBtn, #attackBtn { width: 56px !important; height: 56px !important; font-size: 24px !important; align-self: flex-end; }
     /* Aviso para girar o celular (modo paisagem obrigatório) */
     #rotate { display: none; position: fixed; inset: 0; z-index: 50; background: #111; color: #fff; flex-direction: column;
       align-items: center; justify-content: center; gap: 14px; text-align: center; font-size: 18px; padding: 24px; }
@@ -166,6 +189,12 @@
   <div id="emoteTray"></div>
   <div id="hud" hidden></div>
   <div id="moveHint" hidden></div>
+  <div id="arenaRank" hidden><h4>⚔️ Ranking da arena</h4><ol id="arenaRankList"></ol></div>
+  <div id="arenaBar" hidden>
+    <div id="arenaHp"><div id="arenaHpFill"></div><div id="arenaHpText"></div></div>
+    <div id="arenaWeapons"></div>
+  </div>
+  <div id="arenaMsg" hidden></div>
   <button id="helpBtn" title="Ajuda: como usar os comandos" hidden>?</button>
   <div id="helpModal" hidden>
     <div id="helpPanel" role="dialog" aria-label="Ajuda">
@@ -178,7 +207,7 @@
   <div id="rotate"><div style="font-size:64px">📱</div><div>Gire o celular para o modo paisagem para jogar</div></div>
   <div id="touch">
     <div class="grp"><button data-key="left">◀</button><button data-key="right">▶</button></div>
-    <div class="grp mid"><button id="talkBtn" title="Falar">💬</button><button id="emoteBtn" title="Emotes">😀</button></div>
+    <div class="grp mid"><button id="attackBtn" title="Atacar">🗡️</button><button id="talkBtn" title="Falar">💬</button><button id="emoteBtn" title="Emotes">😀</button></div>
     <div class="grp"><button data-key="jump">▲</button></div>
   </div>
 

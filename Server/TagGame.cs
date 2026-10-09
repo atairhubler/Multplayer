@@ -16,6 +16,11 @@ public static class TagGame
     private static CancellationTokenSource? _cts;
     private static readonly Random Rng = new();
 
+    public static bool IsParticipant(string id)
+    {
+        lock (Gate) return _active && Participants.Contains(id);
+    }
+
     public static object Snapshot()
     {
         lock (Gate)
@@ -38,10 +43,10 @@ public static class TagGame
         lock (Gate)
         {
             if (_active) refuse = "O pique-pega já está em andamento. Use /pique parar para encerrar.";
-            else if (GameHub.Players.Count < 2) refuse = "São necessários pelo menos 2 jogadores para o pique-pega.";
+            else if (GameHub.Players.Values.Count(p => p.Map == "village") < 2) refuse = "São necessários pelo menos 2 jogadores para o pique-pega.";
             else
             {
-                var ids = GameHub.Players.Keys.ToList();
+                var ids = GameHub.Players.Values.Where(p => p.Map == "village").Select(p => p.Id).ToList();
                 _itId = ids[Rng.Next(ids.Count)];
                 Participants.Clear();
                 ItSeconds.Clear();
@@ -85,11 +90,11 @@ public static class TagGame
                     if (_itId is not null) ItSeconds[_itId] = ItSeconds.GetValueOrDefault(_itId) + 0.1;
 
                     if (DateTime.UtcNow >= _endsAt) ended = true;
-                    else if (_itId is not null && GameHub.Players.TryGetValue(_itId, out var it) && it.RidingOn is null
+                    else if (_itId is not null && GameHub.Players.TryGetValue(_itId, out var it) && it.RidingOn is null && it.Map == "village"
                              && (DateTime.UtcNow - _lastTransfer).TotalSeconds >= ImmunitySeconds)
                     {
                         // quem está nas costas de alguém fica a salvo
-                        var victim = GameHub.Players.Values.FirstOrDefault(p => p.Id != it.Id && p.RidingOn is null
+                        var victim = GameHub.Players.Values.FirstOrDefault(p => p.Id != it.Id && p.RidingOn is null && p.Map == "village"
                             && Math.Abs(p.X - it.X) < 48 && Math.Abs(p.Y - it.Y) < 64);
                         if (victim is not null)
                         {

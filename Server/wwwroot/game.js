@@ -12,6 +12,7 @@ const CHAR_W = Math.round(32 * CHAR_SCALE), CHAR_H = Math.round(48 * CHAR_SCALE)
 const LABEL_DY = CHAR_H / 2 + 14, BUBBLE_DY = CHAR_H / 2 + 26; // nome e balão acima da cabeça
 
 let connection;
+let currentMap = 'village'; // 'village' (vilarejo) ou 'arena'
 let myName = '';
 let myCharacter = 'char:m:4a2c17:f1c27d:3498db';
 let customImage = null; // data URL do avatar enviado pelo usuário
@@ -187,6 +188,7 @@ function updateGifs() {
   const r = phaserGame.canvas.getBoundingClientRect();
   const k = r.width / WORLD_W;
   for (const { sprite, img } of gifSprites) {
+    img.style.display = sprite.visible ? '' : 'none';
     img.style.width = CHAR_W * k + 'px';
     img.style.height = CHAR_H * k + 'px';
     img.style.transform = `translate(${r.left + (sprite.x - CHAR_W / 2) * k}px, ${r.top + (sprite.y - CHAR_H / 2) * k}px)`;
@@ -278,8 +280,9 @@ function createRemote(scene, p, announce = false) {
   const label = scene.add.text(p.x, p.y, p.name, LABEL_STYLE).setOrigin(0.5, 1);
   remotePlayers[p.id] = {
     rect, label, name: p.name, title: p.title || null, nameColor: p.nameColor || null,
-    dancing: !!p.dancing, targetX: p.x, targetY: p.y,
+    dancing: !!p.dancing, targetX: p.x, targetY: p.y, map: p.map || 'village',
   };
+  syncVisibility(p.id);
   if (p.ridingOn) { ridingMap[p.id] = p.ridingOn; rect.setDepth(2); }
   refreshLabel(p.id);
   renderOnline();
@@ -293,11 +296,39 @@ const bubbles = {}; // id -> { text, expires }
 function showBubble(id, message) {
   if (!gameScene) return;
   bubbles[id]?.text.destroy();
+  const m = gameScene.cache.json.get('balaoMeta');
+  if (!m) { // sem a arte do pergaminho: balão simples
+    const t = gameScene.add.text(0, 0, message, { fontSize: '14px', color: '#111', backgroundColor: '#ffffff', align: 'center',
+      padding: { x: 8, y: 5 }, wordWrap: { width: 170, useAdvancedWrap: true } }).setOrigin(0.5, 1).setDepth(10);
+    bubbles[id] = { text: t, expires: gameScene.time.now + 3000 + message.length * 60 };
+    return;
+  }
+  // pergaminho em 3 partes: as pontas (rolos) mantêm o formato e só o meio estica conforme o texto
+  const tex = gameScene.textures.get('balao');
+  if (!tex.has('balao_l')) {
+    tex.add('balao_l', 0, 0, 0, m.capL, m.height);
+    tex.add('balao_m', 0, m.capL, 0, m.width - m.capL - m.capR, m.height);
+    tex.add('balao_r', 0, m.width - m.capR, 0, m.capR, m.height);
+  }
   const text = gameScene.add.text(0, 0, message, {
-    fontSize: '14px', color: '#111', backgroundColor: '#ffffff', align: 'center',
-    padding: { x: 8, y: 5 }, wordWrap: { width: 170, useAdvancedWrap: true }
-  }).setOrigin(0.5, 1).setDepth(10);
-  bubbles[id] = { text, expires: gameScene.time.now + 3000 + message.length * 60 };
+    fontSize: '13px', fontStyle: 'bold', color: '#3b2410', align: 'center', lineSpacing: 2,
+    wordWrap: { width: 170, useAdvancedWrap: true },
+  }).setOrigin(0.5);
+  const textW = Math.max(text.width, 28), textH = text.height;
+  const s = Math.max(0.55, (textH + 8) / (m.height - m.padTop - m.padBottom)); // escala da imagem para o texto caber
+  const capL = m.capL * s, capR = m.capR * s, h = m.height * s, tail = 9;
+  const midW = textW + 2 * m.padX * s + 6, W = capL + midW + capR;
+  const left = gameScene.add.image(-W / 2, -tail, 'balao', 'balao_l').setOrigin(0, 1).setScale(s);
+  const mid = gameScene.add.image(-W / 2 + capL, -tail, 'balao', 'balao_m').setOrigin(0, 1).setDisplaySize(midW, h);
+  const right = gameScene.add.image(W / 2 - capR, -tail, 'balao', 'balao_r').setOrigin(0, 1).setScale(s);
+  const pointer = gameScene.add.graphics(); // pontinha do balão apontando para quem fala
+  pointer.fillStyle(0xe8cf9b, 1).fillTriangle(-6, -tail - 1, 6, -tail - 1, 0, 0);
+  pointer.lineStyle(2, 0x7a5230, 1).lineBetween(-6, -tail - 1, 0, 0).lineBetween(6, -tail - 1, 0, 0);
+  text.setPosition(0, -tail - h / 2 + 1);
+  const box = gameScene.add.container(0, 0, [pointer, mid, left, right, text]).setDepth(10);
+  box.setScale(0.6);
+  gameScene.tweens.add({ targets: box, scale: 1, duration: 180, ease: 'Back.Out' });
+  bubbles[id] = { text: box, half: W / 2, expires: gameScene.time.now + 3000 + message.length * 60 };
 }
 
 function updateBubbles(now) {
@@ -305,7 +336,9 @@ function updateBubbles(now) {
     const b = bubbles[id];
     const anchor = id === connection.connectionId ? localSprite : remotePlayers[id]?.rect;
     if (!anchor || now > b.expires) { b.text.destroy(); delete bubbles[id]; continue; }
-    const half = b.text.width / 2;
+    b.text.setVisible(anchor.visible);
+    b.text.setAlpha(Math.min(1, (b.expires - now) / 300));
+    const half = b.half ?? b.text.width / 2;
     b.text.setPosition(Phaser.Math.Clamp(anchor.x, half, WORLD_W - half), anchor.y - BUBBLE_DY - liftFor(id) - shareLift(id));
   }
 }
@@ -319,6 +352,10 @@ let background, backgroundPeriod, lastBackgroundCheck = 0;
 function preload() {
   backgroundPeriod = backgroundForHour(new Date().getHours());
   this.load.image('bg' + backgroundPeriod, BACKGROUNDS[backgroundPeriod]);
+  this.load.image('fundo_arena', 'assets/fundo_arena.jpg');
+  this.load.image('placa', 'assets/placa_arena.png');
+  this.load.image('balao', 'assets/balao.png');
+  this.load.json('balaoMeta', 'assets/balao.json');
 }
 
 function updateBackground(scene, time) {
@@ -343,6 +380,8 @@ function create() {
 
   createColorTextures(this);
   background = this.add.image(0, 0, 'bg' + backgroundPeriod).setOrigin(0).setDisplaySize(WORLD_W, VIEW_H).setDepth(-10);
+  // placa pequena (menor que um personagem) apontando para a arena, no fim da rua à direita
+  signArena = this.add.image(1135, GROUND_TOP, 'placa').setOrigin(0.5, 1).setDisplaySize(97, 58).setDepth(-1);
 
   // Mapa: só o chão (invisível; a rua desenhada no fundo é o chão visível)
   const platforms = this.physics.add.staticGroup();
@@ -408,6 +447,8 @@ function create() {
     renderOnline();
   });
 
+  setupArenaEvents();
+
   connection.invoke('JoinGame', myName, myCharacter);
   // cor do nome e título (se o servidor for antigo e não tiver o método, ignora o erro)
   connection.invoke('UpdateProfile', localInfo.nameColor, localInfo.title).catch(() => {});
@@ -416,26 +457,39 @@ function create() {
 function update(time, delta) {
   const body = player.body;
   const typing = document.activeElement === chatInput;
-  const left = (!typing && cursors.left.isDown) || touch.left;
-  const right = (!typing && cursors.right.isDown) || touch.right;
-  const jump = (!typing && cursors.up.isDown) || touch.jump;
+  let left = (!typing && cursors.left.isDown) || touch.left;
+  let right = (!typing && cursors.right.isDown) || touch.right;
+  let jump = (!typing && cursors.up.isDown) || touch.jump;
+  if (currentMap === 'arena' && !arenaMeAlive()) left = right = jump = false; // caído: espera o respawn
   if (!moveHintDone && (left || right || jump)) hideMoveHint();
   const carrierId = ridingMap[myId()];
   const carrier = carrierId && remotePlayers[carrierId];
+  if (!carrier) {
+    if (left && !right) facing = -1; else if (right && !left) facing = 1;
+    handleDash(time, left, right);
+  }
 
   if (carrier) { // nas costas de alguém: acompanha o carregador; pular desce
     player.setPosition(carrier.rect.x, carrier.rect.y);
     if (jump && !jumpLatch) doRide();
   } else {
-    if (time < pushUntil) body.setVelocityX(pushVX * (pushUntil - time) / PUSH_MS); // empurrão que vai perdendo força
-    else if (left) body.setVelocityX(-200);
-    else if (right) body.setVelocityX(200);
-    else body.setVelocityX(0);
+    if (time < dashUntil) { // dash: impulso curto, sem gravidade (também vale no ar)
+      body.allowGravity = false;
+      body.setVelocityX(dashDir * DASH_SPEED);
+      body.setVelocityY(0);
+    } else {
+      body.allowGravity = true;
+      if (time < pushUntil) body.setVelocityX(pushVX * (pushUntil - time) / PUSH_MS); // empurrão que vai perdendo força
+      else if (left) body.setVelocityX(-200);
+      else if (right) body.setVelocityX(200);
+      else body.setVelocityX(0);
+    }
 
     if (jump && body.blocked.down) body.setVelocityY(-500);
     if (localDancing && (left || right || jump)) setDancing(false); // andar interrompe a dança
   }
   jumpLatch = jump;
+  checkMapEdge(delta, left, right, carrier);
 
   if (carrier) {
     localSprite.setPosition(player.x, player.y - CHAR_H * 0.72);
@@ -477,13 +531,16 @@ function update(time, delta) {
     }
     if (!r.rect.animate && r.rect.setAngle) r.rect.angle = r.dancing ? Math.sin(Date.now() / 150) * 10 : 0;
     placeLabel(r.label, r.rect.x, Math.max(r.rect.y - liftFor(id), LABEL_MIN_Y));
+    syncVisibility(id);
   }
-  updateInteractHint(carrier);
+  if (currentMap === 'village') updateInteractHint(carrier); else hideInteractHint();
   updateTagFlash();
   updateGifs();
   updateProjections();
   positionChat();
-  updateBackground(this, time);
+  if (currentMap === 'village') updateBackground(this, time);
+  drawArenaBars();
+  updateArrows(delta);
 }
 
 // ---- Controles de toque (celular) ----
@@ -555,6 +612,12 @@ function positionChat() {
   interactHint.style.top = r.top + 44 + 'px';
   moveHint.style.left = r.left + r.width / 2 + 'px';
   moveHint.style.top = r.top + r.height / 2 + 'px';
+  if (coarsePointer) { arenaRankEl.style.right = innerWidth - r.right + 8 + 'px'; arenaRankEl.style.top = r.top + 48 + 'px'; arenaRankEl.style.left = 'auto'; }
+  else { arenaRankEl.style.left = r.left + 12 + 'px'; arenaRankEl.style.top = r.top + 8 + 'px'; }
+  arenaBarEl.style.left = r.left + r.width / 2 + 'px';
+  arenaBarEl.style.top = r.top + 8 + 'px'; // no alto, para não cobrir os personagens na calçada
+  arenaMsgEl.style.left = r.left + r.width / 2 + 'px';
+  arenaMsgEl.style.top = r.top + r.height * 0.38 + 'px';
   helpBtn.style.right = innerWidth - r.right + 12 + 'px';
   helpBtn.style.bottom = innerHeight - r.bottom + (coarsePointer ? 108 : 12) + 'px'; // no celular fica acima dos botões de toque
   chatEl.style.left = r.left + 12 + 'px';
@@ -871,7 +934,7 @@ function sendEmote(i) {
 }
 
 window.addEventListener('keydown', e => {
-  if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || !chatBar.hidden) return;
+  if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || !chatBar.hidden || currentMap === 'arena') return;
   if (e.key >= '1' && e.key <= String(EMOTES.length)) sendEmote(Number(e.key) - 1);
 });
 
@@ -1145,18 +1208,28 @@ function playChime() {
 // Plim discreto quando chega mensagem de um amigo no chat
 let lastPing = 0;
 function playPing() {
-  if (!music.ctx || !music.sfx || music.muted || music.ctx.state !== 'running') return;
+  unlockAudio(); // cria/retoma o áudio se o navegador o tiver suspendido
+  if (!music.ctx || !music.sfx || music.muted) return;
   const now = Date.now();
   if (now - lastPing < 150) return; // várias mensagens juntas não viram uma rajada de sons
   lastPing = now;
-  const t0 = music.ctx.currentTime;
-  const osc = music.ctx.createOscillator(), g = music.ctx.createGain();
-  osc.type = 'triangle'; osc.frequency.setValueAtTime(1046.5, t0); osc.frequency.exponentialRampToValueAtTime(1568, t0 + 0.08);
-  g.gain.setValueAtTime(0.0001, t0);
-  g.gain.linearRampToValueAtTime(0.16, t0 + 0.01);
-  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.28);
-  osc.connect(g); g.connect(music.sfx);
-  osc.start(t0); osc.stop(t0 + 0.3);
+  const play = () => {
+    const t0 = music.ctx.currentTime;
+    // "ding-dong" de duas notas, mais forte que o aviso de entrada para dar para ouvir mesmo com a música tocando
+    [[1318.5, 0], [1760, 0.12]].forEach(([freq, delay]) => {
+      for (const [type, mult, gain] of [['sine', 1, 0.5], ['triangle', 2, 0.12]]) {
+        const osc = music.ctx.createOscillator(), g = music.ctx.createGain();
+        osc.type = type; osc.frequency.value = freq * mult;
+        g.gain.setValueAtTime(0.0001, t0 + delay);
+        g.gain.linearRampToValueAtTime(gain, t0 + delay + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + delay + 0.45);
+        osc.connect(g); g.connect(music.sfx);
+        osc.start(t0 + delay); osc.stop(t0 + delay + 0.5);
+      }
+    });
+  };
+  if (music.ctx.state === 'running') play();
+  else music.ctx.resume().then(play).catch(() => {}); // sem gesto do usuário o navegador pode recusar: então fica mudo
 }
 
 // ---- Comandos do chat: /comandos e a ajuda de cada um ----
@@ -1276,6 +1349,8 @@ function runCommand(text) {
       '/cor — mudar a cor do seu nome',
       '/voz — chat de voz com microfone',
       '/compartilhar — compartilhar sua tela numa projeção sobre a sua cabeça',
+      '/arena — como entrar na arena e lutar',
+      '/dash — dois toques na seta dão um impulso',
     ]);
   }
   if (cmd === 'emote' && /^[1-6]$/.test(args[0] || '')) return sendEmote(Number(args[0]) - 1);
@@ -1327,7 +1402,7 @@ function colorCommand(arg) {
 // ---- Atalhos de teclado (PC) e botões na bandeja (celular) ----
 const KEY_ACTIONS = { h: doGreet, q: doPush, r: doRide, g: doDance, e: doInteract };
 window.addEventListener('keydown', e => {
-  if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || !chatReady || !chatBar.hidden || !helpModal.hidden) return;
+  if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || !chatReady || !chatBar.hidden || !helpModal.hidden || currentMap === 'arena') return;
   KEY_ACTIONS[e.key.toLowerCase()]?.();
 });
 [['🤝', 'Cumprimentar', doGreet], ['💢', 'Empurrar', doPush], ['🐴', 'Subir ou descer das costas', doRide],
@@ -1502,6 +1577,7 @@ setInterval(() => {
   for (const [id, peer] of Object.entries(voice.peers)) { // quanto mais longe no mapa, mais baixo
     const r = remotePlayers[id]?.rect;
     if (!peer.audio || !r || typeof player === 'undefined') continue;
+    if (remotePlayers[id].map !== currentMap) { peer.audio.volume = VOICE_MIN_VOLUME; continue; }
     const d = Math.hypot(r.x - player.x, r.y - player.y);
     peer.audio.volume = Math.max(VOICE_MIN_VOLUME, Math.min(1, 1 - (d - VOICE_NEAR) / (VOICE_FAR - VOICE_NEAR) * (1 - VOICE_MIN_VOLUME)));
   }
@@ -1614,8 +1690,8 @@ function updateProjections() {
   const h = PROJ_W * projMeta.height / projMeta.width;
   for (const [id, p] of Object.entries(projections)) {
     const sprite = id === myId() ? localSprite : remotePlayers[id]?.rect;
-    p.root.style.display = sprite ? '' : 'none';
-    if (!sprite) continue;
+    p.root.style.display = sprite && sprite.visible ? '' : 'none';
+    if (!sprite || !sprite.visible) continue;
     p.root.style.setProperty('--k', k);
     p.root.style.width = PROJ_W * k + 'px';
     p.root.style.height = h * k + 'px';
@@ -1810,7 +1886,7 @@ function nearestSharer() {
   let best = null, bestDx = SHARE_RANGE;
   for (const id of share.sharers) {
     const r = remotePlayers[id]?.rect;
-    if (!r) continue;
+    if (!r || remotePlayers[id].map !== currentMap) continue;
     const dx = Math.abs(r.x - player.x);
     if (dx < bestDx && Math.abs(r.y - player.y) < 130) { best = id; bestDx = dx; }
   }
@@ -1836,4 +1912,407 @@ function onProjectionClick(id) {
 function setupShareEvents() {
   connection.on('ShareState', (id, on) => { if (on) markSharer(id); else dropShare(id); });
   connection.on('ShareSignal', handleShareSignal);
+}
+
+// ======================= Mapas, arena (combate) e dash =======================
+// Vilarejo e arena são mapas separados: andar até o fim da rua à direita leva à arena (e o fim da esquerda da arena volta).
+// O servidor (ArenaGame.cs) decide vida, dano, alcance e pontos; aqui ficam os controles, o HUD e os efeitos visuais.
+const WEAPONS = [
+  { name: 'Espada', icon: '⚔️' }, { name: 'Lança', icon: '🔱' }, { name: 'Arco', icon: '🏹' },
+  { name: 'Martelo', icon: '🔨' }, { name: 'Garras', icon: '🐾' },
+];
+const MAP_EDGE_HOLD_MS = 400, ATTACK_MIN_GAP_MS = 120, ARROW_SPEED = 600, ARROW_RANGE = 650;
+const DASH_SPEED = 600, DASH_MS = 140, DASH_COOLDOWN_MS = 500, DASH_TAP_MS = 250;
+
+let signArena = null, facing = 1, myWeapon = 0, edgeHold = 0, mapRequestAt = 0, lastAttackAt = 0;
+let dashUntil = 0, dashDir = 1, dashReadyAt = 0, prevLeft = false, prevRight = false;
+const lastTap = { left: -1e9, right: -1e9 };
+let arenaList = [], arenaById = {};
+const arrows = {};
+let barsGfx = null;
+
+const arenaRankEl = document.getElementById('arenaRank');
+const arenaRankList = document.getElementById('arenaRankList');
+const arenaBarEl = document.getElementById('arenaBar');
+const arenaHpFill = document.getElementById('arenaHpFill');
+const arenaHpText = document.getElementById('arenaHpText');
+const arenaMsgEl = document.getElementById('arenaMsg');
+const weaponsEl = document.getElementById('arenaWeapons');
+
+const spritePos = id => { const sp = id === myId() ? localSprite : remotePlayers[id]?.rect; return sp ? { x: sp.x, y: sp.y } : null; };
+const isHere = id => id === myId() || remotePlayers[id]?.map === currentMap;
+const arenaMeAlive = () => arenaById[myId()]?.alive !== false;
+
+// quem está em outro mapa não aparece (corpo, nome, GIF e balão)
+function syncVisibility(id) {
+  const r = remotePlayers[id];
+  if (!r) return;
+  const here = r.map === currentMap;
+  if (r.rect.visible !== here) { r.rect.setVisible(here); r.label.setVisible(here); }
+}
+
+function hideInteractHint() {
+  if (interactHint.hidden && lastHintKey === null) return;
+  interactHint.hidden = true; lastHintKey = null; currentSpot = -1; currentShareTarget = null;
+}
+
+// ---- Troca de mapa ----
+function applyMap(map) {
+  currentMap = map;
+  const arena = map === 'arena';
+  document.body.classList.toggle('inArena', arena);
+  signArena?.setVisible(!arena);
+  if (arena) background.setTexture('fundo_arena').setDisplaySize(WORLD_W, VIEW_H);
+  else setVillageBackground();
+  for (const id in remotePlayers) syncVisibility(id);
+  for (const id in bubbles) { bubbles[id].text.destroy(); delete bubbles[id]; }
+  helpModal.hidden = true;
+  refreshHelpForMap();
+  updateArenaHud();
+  hideMoveHint();
+  gameScene.cameras.main.fadeIn(300, 0, 0, 0);
+  renderOnline();
+}
+
+function setVillageBackground() {
+  backgroundPeriod = backgroundForHour(new Date().getHours());
+  const period = backgroundPeriod, key = 'bg' + period;
+  const apply = () => { if (currentMap === 'village' && backgroundPeriod === period) background.setTexture(key).setDisplaySize(WORLD_W, VIEW_H); };
+  if (gameScene.textures.exists(key)) apply();
+  else { gameScene.load.image(key, BACKGROUNDS[period]); gameScene.load.once('complete', apply); gameScene.load.start(); }
+}
+
+// Segurar → no fim da rua (vilarejo) ou ← no começo da arena por um instante pede a troca de mapa ao servidor
+function checkMapEdge(delta, left, right, carrier) {
+  const target = currentMap === 'village' ? 'arena' : 'village';
+  const atEdge = !carrier && (target === 'arena' ? right && player.x >= WORLD_W - CHAR_W / 2 - 4 : left && player.x <= CHAR_W / 2 + 4);
+  edgeHold = atEdge ? edgeHold + delta : 0;
+  if (edgeHold < MAP_EDGE_HOLD_MS || Date.now() - mapRequestAt < 2500) return;
+  mapRequestAt = Date.now();
+  edgeHold = 0;
+  connection.invoke('ChangeMap', target).catch(() => {
+    say(['⚠️ A arena ainda não está disponível no servidor (ele pode estar atualizando). Tente de novo em alguns minutos.']);
+  });
+}
+
+// ---- Dash: dois toques rápidos para o lado (no chão ou no ar) ----
+function handleDash(time, left, right) {
+  const tapL = left && !prevLeft, tapR = right && !prevRight;
+  prevLeft = left; prevRight = right;
+  for (const [tap, key, dir] of [[tapL, 'left', -1], [tapR, 'right', 1]]) {
+    if (!tap) continue;
+    if (time - lastTap[key] <= DASH_TAP_MS && time >= dashReadyAt && time >= pushUntil && !ridingMap[myId()]) {
+      dashUntil = time + DASH_MS; dashDir = dir; dashReadyAt = time + DASH_COOLDOWN_MS;
+      lastTap[key] = -1e9;
+      if (localDancing) setDancing(false);
+      dashFx(myId(), dir);
+      sfxDash();
+      connection.invoke('Dash', dir).catch(() => {});
+    } else lastTap[key] = time;
+  }
+}
+
+function dashFx(id, dir) {
+  const p = spritePos(id);
+  if (!p || !isHere(id)) return;
+  const g = gameScene.add.graphics().setDepth(6).setPosition(p.x - dir * 18, p.y);
+  g.lineStyle(3, 0xffffff, 0.8);
+  for (const dy of [-18, -2, 14]) g.lineBetween(0, dy, -dir * (28 + Math.abs(dy)), dy);
+  gameScene.tweens.add({ targets: g, alpha: 0, x: g.x - dir * 22, duration: 240, onComplete: () => g.destroy() });
+  if (p.y > GROUND_TOP - 50) { // poeira nos pés
+    for (let i = 0; i < 5; i++) {
+      const c = gameScene.add.circle(p.x - dir * (6 + i * 7), GROUND_TOP - 3, 3 + Math.random() * 2, 0xd8cdb8, 0.8).setDepth(6);
+      gameScene.tweens.add({ targets: c, y: c.y - 10 - Math.random() * 8, scale: 2, alpha: 0, duration: 320, onComplete: () => c.destroy() });
+    }
+  }
+}
+
+// Sons estilo 16 bits: notas em degraus (ondas quadrada/serra/triângulo) e rajadas de ruído, como nos consoles antigos
+function chip(notes, step, type = 'square', gain = 0.1) {
+  if (!music.ctx || !music.sfx || music.muted || music.ctx.state !== 'running') return;
+  const t0 = music.ctx.currentTime, o = music.ctx.createOscillator(), g = music.ctx.createGain();
+  o.type = type;
+  notes.forEach((f, i) => o.frequency.setValueAtTime(f || 1, t0 + i * step)); // sem rampa: a frequência "pula" de nota em nota
+  const end = t0 + notes.length * step;
+  g.gain.setValueAtTime(gain, t0);
+  g.gain.setValueAtTime(gain * 0.7, t0 + notes.length * step * 0.6);
+  g.gain.linearRampToValueAtTime(0.0001, end);
+  o.connect(g); g.connect(music.sfx); o.start(t0); o.stop(end + 0.02);
+}
+let noiseBuf = null;
+function chipNoise(dur, gain = 0.12, filter = 'highpass', cutoff = 2000, delay = 0) {
+  if (!music.ctx || !music.sfx || music.muted || music.ctx.state !== 'running') return;
+  const ctx = music.ctx;
+  if (!noiseBuf) { // ruído "áspero": valores sorteados e mantidos por 2 amostras (parece de chip de som)
+    noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 0.5, ctx.sampleRate);
+    const d = noiseBuf.getChannelData(0);
+    for (let i = 0; i < d.length; i += 2) d[i] = d[i + 1] = Math.random() * 2 - 1;
+  }
+  const t0 = ctx.currentTime + delay, src = ctx.createBufferSource(), flt = ctx.createBiquadFilter(), g = ctx.createGain();
+  src.buffer = noiseBuf; flt.type = filter; flt.frequency.value = cutoff;
+  g.gain.setValueAtTime(gain, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  src.connect(flt); flt.connect(g); g.connect(music.sfx); src.start(t0); src.stop(t0 + dur + 0.02);
+}
+function sfxAttack(weapon) {
+  if (weapon === 0) { chipNoise(0.1, 0.1, 'highpass', 2500); chip([880, 1175, 1568, 1760], 0.025, 'square', 0.07); } // espada: "shing"
+  else if (weapon === 1) { chipNoise(0.08, 0.08, 'bandpass', 3000); chip([660, 880, 1320, 1760, 1976], 0.022, 'square', 0.07); } // lança: estocada
+  else if (weapon === 2) { chip([1400, 1100, 800, 560, 420], 0.028, 'triangle', 0.14); chipNoise(0.05, 0.06, 'highpass', 4000, 0.02); } // arco: "tuim"
+  else if (weapon === 3) { chipNoise(0.22, 0.2, 'lowpass', 700, 0.04); chip([196, 147, 110, 82, 65], 0.05, 'square', 0.14); } // martelo: pancada grave
+  else { chip([1568, 1319, 1568, 1319, 1760], 0.02, 'sawtooth', 0.06); chipNoise(0.07, 0.09, 'highpass', 3500); } // garras: riscos rápidos
+}
+function sfxHurt(me) {
+  if (me) { chip([392, 311, 247, 196, 147], 0.045, 'square', 0.16); chipNoise(0.14, 0.14, 'lowpass', 1800); } // você apanhou: mais forte
+  else { chip([294, 220, 165], 0.04, 'square', 0.07); chipNoise(0.08, 0.07, 'lowpass', 2200); }
+}
+function sfxDeath() { chip([440, 415, 392, 349, 311, 277, 233, 196, 147, 110], 0.065, 'square', 0.13); chipNoise(0.35, 0.12, 'lowpass', 900, 0.4); }
+function sfxDash() { chipNoise(0.14, 0.08, 'bandpass', 1500); chip([300, 450, 600], 0.03, 'square', 0.04); }
+
+// ---- Ataque e armas ----
+function doAttack() {
+  if (currentMap !== 'arena' || !chatReady || !arenaMeAlive() || ridingMap[myId()]) return;
+  const now = Date.now();
+  if (now - lastAttackAt < ATTACK_MIN_GAP_MS) return;
+  lastAttackAt = now;
+  connection.invoke('Attack', facing).catch(() => {});
+}
+
+function selectWeapon(i) {
+  if (i < 0 || i >= WEAPONS.length) return;
+  myWeapon = i;
+  updateArenaHud();
+  connection.invoke('SetWeapon', i).catch(() => {});
+}
+
+WEAPONS.forEach((w, i) => {
+  const b = document.createElement('button');
+  b.title = `${w.name} (tecla ${i + 1})`;
+  const k = document.createElement('small'); k.textContent = i + 1;
+  b.append(k, document.createTextNode(w.icon));
+  b.addEventListener('click', () => selectWeapon(i));
+  weaponsEl.appendChild(b);
+});
+document.getElementById('attackBtn').addEventListener('pointerdown', e => { e.preventDefault(); doAttack(); });
+window.addEventListener('keydown', e => {
+  if (currentMap !== 'arena' || e.ctrlKey || e.metaKey || e.altKey || !chatReady || !chatBar.hidden || !helpModal.hidden) return;
+  if (e.code === 'Space' || e.key.toLowerCase() === 'x') { e.preventDefault(); doAttack(); }
+  else if (!e.repeat && e.key >= '1' && e.key <= String(WEAPONS.length)) selectWeapon(Number(e.key) - 1);
+});
+
+// ---- HUD: ranking, vida e arma ----
+function updateArenaHud() {
+  const arena = currentMap === 'arena';
+  arenaRankEl.hidden = arenaBarEl.hidden = !arena;
+  if (!arena) { arenaMsgEl.hidden = true; return; }
+  const me = arenaById[myId()];
+  const hp = me ? me.hp : 100;
+  arenaHpFill.style.width = hp + '%';
+  arenaHpText.textContent = `${hp} / 100`;
+  [...weaponsEl.children].forEach((b, i) => b.classList.toggle('sel', i === myWeapon));
+  arenaMsgEl.hidden = arenaMeAlive();
+  if (!arenaMsgEl.hidden) arenaMsgEl.textContent = '💀 Você caiu! Voltando à arena em 3 segundos...';
+  arenaRankList.replaceChildren(...arenaList.slice(0, 5).map((p, i) => {
+    const li = document.createElement('li');
+    const name = document.createElement('span'), pts = document.createElement('span');
+    name.textContent = `${i + 1}. ${p.name}`; // textContent: nomes nunca viram HTML
+    pts.textContent = p.score;
+    li.append(name, pts);
+    if (p.id === myId()) li.className = 'me';
+    return li;
+  }));
+}
+
+// jogador caído fica meio transparente (fantasma) até voltar
+function setGhost(id, on) {
+  const sp = id === myId() ? localSprite : remotePlayers[id]?.rect;
+  if (!sp) return;
+  const gif = [...gifSprites].find(g => g.sprite === sp);
+  if (gif) gif.img.style.opacity = on ? 0.35 : 1;
+  else sp.setAlpha(on ? 0.35 : 1);
+}
+
+// barras de vida sobre o nome de quem está na arena
+function drawArenaBars() {
+  if (!barsGfx) barsGfx = gameScene.add.graphics().setDepth(6);
+  barsGfx.clear();
+  if (currentMap !== 'arena') return;
+  for (const p of arenaList) {
+    if (!p.alive || !isHere(p.id)) continue;
+    const label = p.id === myId() ? nameLabel : remotePlayers[p.id]?.label;
+    if (!label) continue;
+    const w = 46, h = 6, x = label.x - w / 2, y = label.y - label.height - 9;
+    const pct = Phaser.Math.Clamp(p.hp / 100, 0, 1);
+    barsGfx.fillStyle(0x000000, 0.7).fillRect(x - 1, y - 1, w + 2, h + 2);
+    barsGfx.fillStyle(pct > 0.5 ? 0x4cd964 : pct > 0.25 ? 0xf5c542 : 0xe74c3c, 1).fillRect(x, y, w * pct, h);
+  }
+}
+
+// ---- Efeitos de golpe (desenhados por código) ----
+function swingFx(id, weapon, dir) {
+  const p = spritePos(id);
+  if (!p || !isHere(id)) return;
+  const x = p.x + dir * 14, y = p.y - 6;
+  sfxAttack(weapon);
+  const g = gameScene.add.graphics().setDepth(7).setPosition(x, y).setScale(dir, 1);
+  const done = () => g.destroy();
+  if (weapon === 0) { // espada: meia-lua prateada
+    g.lineStyle(7, 0xffffff, 0.95).beginPath().arc(0, 0, 48, -1.1, 1.1).strokePath();
+    g.lineStyle(3, 0x9fd8ff, 0.9).beginPath().arc(0, 0, 57, -1.1, 1.1).strokePath();
+    g.setScale(0.7 * dir, 0.8);
+    gameScene.tweens.add({ targets: g, scaleX: 1.15 * dir, scaleY: 1, alpha: 0, duration: 230, ease: 'Quad.Out', onComplete: done });
+  } else if (weapon === 1) { // lança: estocada longa
+    g.lineStyle(5, 0x8a5a2b, 1).lineBetween(0, 0, 105, 0);
+    g.fillStyle(0xeeeeee, 1).fillTriangle(105, -8, 130, 0, 105, 8);
+    g.setScale(0.2 * dir, 1);
+    gameScene.tweens.add({ targets: g, scaleX: dir, alpha: 0, duration: 260, ease: 'Quad.Out', onComplete: done });
+  } else if (weapon === 2) { // arco: arco curvo com a corda
+    g.lineStyle(4, 0x8a5a2b, 1).beginPath().arc(0, 0, 22, -1.0, 1.0).strokePath();
+    g.lineStyle(1, 0xffffff, 0.9).lineBetween(Math.cos(1.0) * 22, Math.sin(1.0) * 22, Math.cos(-1.0) * 22, Math.sin(-1.0) * 22);
+    gameScene.tweens.add({ targets: g, alpha: 0, duration: 200, onComplete: done });
+  } else if (weapon === 3) { // martelo: arco pesado + onda de choque no chão
+    g.lineStyle(11, 0xffb347, 0.9).beginPath().arc(0, 0, 58, -1.6, 0.5).strokePath();
+    g.setScale(0.6 * dir, 0.7);
+    gameScene.tweens.add({ targets: g, scaleX: 1.1 * dir, scaleY: 1, alpha: 0, duration: 300, ease: 'Quad.Out', onComplete: done });
+    const wave = gameScene.add.graphics().setDepth(6).setPosition(p.x + dir * 54, GROUND_TOP - 4);
+    wave.lineStyle(4, 0xffe08a, 1).strokeEllipse(0, 0, 80, 16);
+    wave.setScale(0.3);
+    gameScene.tweens.add({ targets: wave, scale: 1.7, alpha: 0, duration: 380, delay: 90, onComplete: () => wave.destroy() });
+  } else { // garras: três riscos
+    for (const [ox, c, w] of [[-10, 0xff4040, 4], [0, 0xffffff, 5], [10, 0xff4040, 4]]) g.lineStyle(w, c, 0.95).lineBetween(ox, -28, ox + 30, 28);
+    gameScene.tweens.add({ targets: g, scaleX: 1.25 * dir, alpha: 0, duration: 210, ease: 'Quad.Out', onComplete: done });
+  }
+}
+
+function hitFx(x, y, dmg) {
+  for (let i = 0; i < 9; i++) {
+    const a = (Math.PI * 2 * i) / 9 + Math.random() * 0.5;
+    const c = gameScene.add.circle(x, y - 6, 2 + Math.random() * 2, i % 2 ? 0xffe066 : 0xffffff).setDepth(8);
+    gameScene.tweens.add({ targets: c, x: x + Math.cos(a) * 34, y: y - 6 + Math.sin(a) * 34, alpha: 0, duration: 320, onComplete: () => c.destroy() });
+  }
+  const t = gameScene.add.text(x, y - 50, '-' + dmg, { fontSize: '20px', fontStyle: 'bold', color: '#ff5252', stroke: '#000', strokeThickness: 4 })
+    .setOrigin(0.5).setDepth(9);
+  gameScene.tweens.add({ targets: t, y: t.y - 34, alpha: 0, duration: 750, ease: 'Quad.Out', onComplete: () => t.destroy() });
+}
+
+function deathFx(x, y) {
+  for (let i = 0; i < 18; i++) {
+    const a = Math.random() * Math.PI * 2, d = 30 + Math.random() * 50;
+    const c = gameScene.add.circle(x, y, 3 + Math.random() * 3, i % 3 ? 0xe74c3c : 0xffffff).setDepth(8);
+    gameScene.tweens.add({ targets: c, x: x + Math.cos(a) * d, y: y + Math.sin(a) * d - 20, alpha: 0, duration: 600, onComplete: () => c.destroy() });
+  }
+  const t = gameScene.add.text(x, y - 40, '💀', { fontSize: '30px' }).setOrigin(0.5).setDepth(9);
+  gameScene.tweens.add({ targets: t, y: t.y - 40, alpha: 0, duration: 1100, onComplete: () => t.destroy() });
+}
+
+// flechas: o servidor decide o acerto; aqui só voam com a mesma velocidade
+function spawnArrow(arrowId, x, y, dir) {
+  const g = gameScene.add.graphics().setDepth(7).setPosition(x, y).setScale(dir, 1);
+  g.lineStyle(3, 0x8a5a2b, 1).lineBetween(-22, 0, 4, 0);
+  g.fillStyle(0xdddddd, 1).fillTriangle(4, -4, 12, 0, 4, 4);
+  g.lineStyle(2, 0xffffff, 0.9).lineBetween(-22, -3, -17, 0).lineBetween(-22, 3, -17, 0);
+  arrows[arrowId] = { g, dir, traveled: 0 };
+}
+function updateArrows(delta) {
+  for (const id in arrows) {
+    const a = arrows[id], step = ARROW_SPEED * delta / 1000;
+    a.g.x += a.dir * step; a.traveled += step;
+    if (a.traveled >= ARROW_RANGE || currentMap !== 'arena') { a.g.destroy(); delete arrows[id]; }
+  }
+}
+
+// ---- Eventos vindos do servidor ----
+function setupArenaEvents() {
+  connection.on('PlayerMap', (id, map, x, y) => {
+    if (id === myId()) {
+      if (map !== currentMap) applyMap(map);
+      player.body.reset(x, y);
+      pushUntil = 0; dashUntil = 0; edgeHold = 0; mapRequestAt = Date.now() - 1500;
+      localDancing = false;
+      if (map === 'arena') connection.invoke('SetWeapon', myWeapon).catch(() => {});
+      updateArenaHud();
+      return;
+    }
+    const r = remotePlayers[id];
+    if (!r) return;
+    r.map = map; r.targetX = x; r.targetY = y;
+    r.rect.setPosition(x, y);
+    r.dancing = false;
+    syncVisibility(id);
+  });
+
+  connection.on('ArenaState', list => {
+    arenaList = list;
+    arenaById = Object.fromEntries(list.map(p => [p.id, p]));
+    for (const p of list) setGhost(p.id, !p.alive);
+    if (!arenaById[myId()]) setGhost(myId(), false);
+    updateArenaHud();
+  });
+
+  connection.on('ArenaSwing', (id, weapon, dir) => swingFx(id, weapon, dir));
+  connection.on('ArrowFired', (arrowId, owner, x, y, dir) => { if (currentMap === 'arena' && isHere(owner)) spawnArrow(arrowId, x, y, dir); });
+
+  connection.on('ArenaHit', (attackerId, victimId, dmg, hp, dir, knock, lift, arrowId) => {
+    if (arrowId && arrows[arrowId]) { arrows[arrowId].g.destroy(); delete arrows[arrowId]; }
+    if (!isHere(victimId)) return;
+    const v = arenaById[victimId];
+    if (v) { v.hp = hp; updateArenaHud(); }
+    const p = spritePos(victimId);
+    if (p) hitFx(p.x, p.y, dmg);
+    sfxHurt(victimId === myId());
+    const sprite = victimId === myId() ? localSprite : remotePlayers[victimId]?.rect;
+    setRedFlash(sprite, true);
+    setTimeout(() => { if (!isIt(victimId)) setRedFlash(sprite, false); }, 140);
+    if (victimId === myId()) { // empurrão do golpe
+      pushVX = dir * knock; pushUntil = gameScene.time.now + PUSH_MS;
+      player.body.setVelocityY(-lift);
+      gameScene.cameras.main.shake(130, 0.004);
+    }
+  });
+
+  connection.on('ArenaKill', (killerId, victimId) => {
+    if (!isHere(victimId)) return;
+    const p = spritePos(victimId);
+    if (p) deathFx(p.x, p.y);
+    sfxDeath();
+    const kn = killerId === myId() ? 'Você' : remotePlayers[killerId]?.name || 'Alguém';
+    const vn = victimId === myId() ? 'você' : remotePlayers[victimId]?.name || 'alguém';
+    addChatLine(null, `⚔️ ${kn} derrotou ${vn}!`, true);
+  });
+
+  connection.on('PlayerDash', (id, dir) => dashFx(id, dir));
+}
+
+// ---- Ajuda da arena (botão ? mostra só isto enquanto o jogador está na arena) ----
+const ARENA_HELP = [
+  '⚔️ Arena: aqui você luta contra os outros jogadores. Cada um começa com 100 de vida; ao chegar a zero, você volta ao ponto de entrada depois de 3 segundos.',
+  '🗡️ Atacar: aperte Espaço (ou X). O golpe vai para o lado em que você está virado. No celular, use o botão 🗡️.',
+  '🎒 Armas: teclas 1 a 5 ou toque nos ícones embaixo — ⚔️ Espada (equilibrada), 🔱 Lança (alcance longo), 🏹 Arco (flecha à distância), 🔨 Martelo (lento, forte e empurra longe), 🐾 Garras (rápidas, dano baixo).',
+  '🏆 Pontos: +1 por golpe que acerta e +10 por derrotar alguém. O ranking fica no canto superior esquerdo.',
+  '💨 Dash: toque duas vezes rápido na seta ← ou →. Vale também no ar! (No celular, dois toques em ◀ ou ▶.)',
+  '🚪 Sair: ande até o começo da arena (esquerda) e segure ← por um instante para voltar ao vilarejo.',
+  'Na arena não dá para subir nas costas, dançar, empurrar ou cumprimentar. Emotes: botão 😀 ou /emote N (de 1 a 6).',
+];
+Object.assign(HELP, {
+  arena: [
+    '⚔️ Arena: ande até o fim da rua, à direita (onde está a placa), e segure → por um instante para entrar. Lá você luta com armas, ganha pontos e aparece no ranking.',
+    'Dentro da arena, o botão ? mostra as instruções de combate. Para voltar, segure ← no começo da arena.',
+  ],
+  dash: [
+    '💨 Dash: toque duas vezes rápido na seta ← ou → para dar um pequeno impulso. Vale também no ar! Depois há uma pequena pausa antes de usar de novo.',
+    'No celular, dois toques em ◀ ou ▶.',
+  ],
+});
+HELP_GROUPS.push({ title: '💨 Movimento e arena', keys: ['dash', 'arena'] });
+
+function refreshHelpForMap() {
+  const arena = currentMap === 'arena';
+  let box = document.getElementById('helpArena');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'helpArena';
+    for (const line of ARENA_HELP) { const p = document.createElement('p'); p.textContent = line; p.style.margin = '8px 0'; p.style.fontSize = '13px'; box.appendChild(p); }
+    document.getElementById('helpGroups').after(box);
+  }
+  box.hidden = !arena;
+  document.getElementById('helpGroups').hidden = arena;
+  document.querySelector('#helpPanel h3 span').textContent = arena ? '❓ Ajuda: Arena' : '❓ Ajuda: comandos e controles';
 }

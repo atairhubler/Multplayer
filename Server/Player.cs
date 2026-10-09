@@ -2,6 +2,7 @@ public class Player
 {
     public string Id { get; set; } = "";
     public string Name { get; set; } = "";
+    public string Map { get; set; } = "village"; // "village" (vilarejo) ou "arena"
     public string CharacterSprite { get; set; } = "";
     public float X { get; set; }
     public float Y { get; set; }

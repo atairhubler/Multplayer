@@ -133,6 +133,8 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
     {
         if (!Players.TryGetValue(Context.ConnectionId, out var player)) return;
         if (player.RidingOn is not null) return; // quem está nas costas de alguém segue o carregador
+        x = Math.Clamp(x, 0, 1280);
+        y = Math.Clamp(y, 0, 600);
         player.X = x;
         player.Y = y;
         await Clients.OthersInGroup(Room).SendAsync("PlayerMoved", player.Id, x, y);
@@ -154,7 +156,7 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
 
     private static Player? Nearest(Player me, float rx, float ry, Func<Player, bool>? filter = null) =>
         Players.Values
-            .Where(p => p.Id != me.Id && Math.Abs(p.X - me.X) <= rx && Math.Abs(p.Y - me.Y) <= ry && (filter?.Invoke(p) ?? true))
+            .Where(p => p.Id != me.Id && p.Map == me.Map && Math.Abs(p.X - me.X) <= rx && Math.Abs(p.Y - me.Y) <= ry && (filter?.Invoke(p) ?? true))
             .OrderBy(p => Math.Abs(p.X - me.X) + Math.Abs(p.Y - me.Y))
             .FirstOrDefault();
 
@@ -168,11 +170,12 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
     public async Task Greet()
     {
         if (!Players.TryGetValue(Context.ConnectionId, out var me) || !Allow(600)) return;
+        if (me.Map != "village") { await Say("Na arena não dá para cumprimentar. Volte ao vilarejo."); return; }
         var near = Nearest(me, 150, 110);
         if (near is null) { await Say("Ninguém por perto para cumprimentar. Chegue mais perto de um amigo."); return; }
 
         var now = Environment.TickCount64;
-        var partner = Players.Values.FirstOrDefault(p => p.Id != me.Id
+        var partner = Players.Values.FirstOrDefault(p => p.Id != me.Id && p.Map == me.Map
             && Math.Abs(p.X - me.X) <= 150 && Math.Abs(p.Y - me.Y) <= 110
             && GreetPending.TryGetValue(p.Id, out var t) && now - t < 5000);
 
@@ -198,6 +201,7 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
     public async Task Push()
     {
         if (!Players.TryGetValue(Context.ConnectionId, out var me) || !Allow(900)) return;
+        if (me.Map != "village") { await Say("Na arena, use as armas! Empurrar é só no vilarejo."); return; }
         if (me.RidingOn is not null) { await Say("Desça das costas do amigo antes de empurrar."); return; }
         var target = Nearest(me, 90, 80, p => p.RidingOn is null);
         if (target is null) { await Say("Ninguém ao alcance para empurrar. Chegue bem perto de um amigo."); return; }
@@ -214,13 +218,14 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
         if (!Players.TryGetValue(Context.ConnectionId, out var me) || !Allow(600)) return;
 
         if (me.RidingOn is not null) { await Dismount(me); return; }
+        if (me.Map != "village") { await Say("Subir nas costas só funciona no vilarejo."); return; }
 
         var rider = Players.Values.FirstOrDefault(p => p.RidingOn == me.Id);
         if (rider is not null) { await Dismount(rider); return; }
 
         // Dá para subir em quem está no topo de uma torre: o carregador não pode ter ninguém nas costas e a torre tem limite de altura
         var carrier = Players.Values
-            .Where(p => p.Id != me.Id && p.RidingOn != me.Id && TowerDepth(p) < MaxTower && !Players.Values.Any(q => q.RidingOn == p.Id))
+            .Where(p => p.Id != me.Id && p.Map == me.Map && p.RidingOn != me.Id && TowerDepth(p) < MaxTower && !Players.Values.Any(q => q.RidingOn == p.Id))
             .Select(p => (Carrier: p, Base: TowerBase(p)))
             .Where(t => Math.Abs(t.Base.X - me.X) <= 100 && Math.Abs(t.Base.Y - me.Y) <= 90)
             .OrderBy(t => Math.Abs(t.Base.X - me.X) + Math.Abs(t.Base.Y - me.Y))
@@ -270,6 +275,7 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
     public async Task SetDancing(bool on)
     {
         if (!Players.TryGetValue(Context.ConnectionId, out var me) || me.Dancing == on) return;
+        if (on && me.Map != "village") return; // na arena não se dança
         me.Dancing = on;
 
         if (on)
@@ -291,10 +297,51 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
         if (total >= 90) await AwardTitle(hubContext, id, "Dançarino");
     }
 
+    // ---------- Mapas, arena e dash ----------
+
+    // Muda de mapa andando até a borda: vilarejo (borda direita) <-> arena (borda esquerda)
+    public async Task ChangeMap(string map)
+    {
+        if (!Players.TryGetValue(Context.ConnectionId, out var me) || !Allow(800)) return;
+        if (map != "village" && map != ArenaGame.MapName) return;
+        if (me.Map == map) return;
+        if (map == ArenaGame.MapName && me.X < 1280 - 70) { await Say("Ande até o fim da rua, à direita, para chegar à arena."); return; }
+        if (map == "village" && me.X > 70) return;
+        if (me.RidingOn is not null) { await Say("Desça das costas do amigo antes de mudar de mapa."); return; }
+        if (TagGame.IsParticipant(me.Id)) { await Say("Termine o pique-pega antes de ir para a arena."); return; }
+
+        foreach (var rider in Players.Values.Where(p => p.RidingOn == me.Id).ToList()) await Dismount(rider); // quem estava nas costas fica para trás
+        if (me.Dancing) { me.Dancing = false; await StopDanceAccounting(me.Id); await Clients.Group(Room).SendAsync("PlayerDance", me.Id, false); }
+
+        var toArena = map == ArenaGame.MapName;
+        me.Map = map;
+        me.X = toArena ? ArenaGame.EntryX : 1220;
+        me.Y = ArenaGame.SpawnY;
+        if (toArena) await ArenaGame.Enter(hubContext, me.Id); else await ArenaGame.Leave(hubContext, me.Id);
+        await Clients.Group(Room).SendAsync("PlayerMap", me.Id, me.Map, me.X, me.Y);
+        if (toArena) await Clients.Caller.SendAsync("ArenaState", ArenaGame.Snapshot());
+    }
+
+    public Task SetWeapon(int weapon) =>
+        Players.ContainsKey(Context.ConnectionId) ? ArenaGame.SetWeapon(hubContext, Context.ConnectionId, weapon) : Task.CompletedTask;
+
+    public async Task Attack(int dir)
+    {
+        if (!Players.TryGetValue(Context.ConnectionId, out var me) || me.Map != ArenaGame.MapName) return;
+        await ArenaGame.Attack(hubContext, me, dir);
+    }
+
+    // Dash: o movimento em si é do cliente; aqui só avisamos os outros para desenharem o efeito
+    public async Task Dash(int dir)
+    {
+        if (!Players.ContainsKey(Context.ConnectionId) || !Allow(250)) return;
+        await Clients.OthersInGroup(Room).SendAsync("PlayerDash", Context.ConnectionId, dir < 0 ? -1 : 1);
+    }
+
     // Interação com o vilarejo: o cliente só informa qual ponto; o servidor mostra o emote e avisa no chat
     public async Task Interact(int spot)
     {
-        if (!Players.TryGetValue(Context.ConnectionId, out var me) || spot < 0 || spot >= Spots.Length || !Allow(700)) return;
+        if (!Players.TryGetValue(Context.ConnectionId, out var me) || me.Map != "village" || spot < 0 || spot >= Spots.Length || !Allow(700)) return;
         await ShowEmote(me.Id, Spots[spot].Emote);
         await SayAll($"{me.Name} {Spots[spot].Text}");
     }
@@ -374,6 +421,7 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
         AvatarStore.RemoveOwnedBy(id);
 
         lock (VoiceLock) VoiceMembers.Remove(id);
+        await ArenaGame.Disconnected(hubContext, id);
 
         if (Players.TryRemove(id, out var gone))
         {

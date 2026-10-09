@@ -24,13 +24,14 @@ Server/
   Program.cs        Minimal API: CORS (ALLOWED_ORIGINS), estáticos, /health, /avatars (upload de GIF), hub em /gamehub
   GameHub.cs        Hub SignalR (jogadores, chat, emotes, ações sociais, voz, compartilhar tela). Estado 100% em memória.
   TagGame.cs        Pique-pega (loop de 100 ms no servidor)
+  ArenaGame.cs      Arena PvP (mapa separado): vida, armas, dano/alcance/recarga, flechas, pontos, ranking, respawn (loop de 50 ms)
   AvatarStore.cs    GIFs animados enviados por upload (memória, 3 MB cada, 150 MB total, somem ao desconectar)
   Player.cs         Modelo do jogador (Id, Name, CharacterSprite, X, Y, NameColor, Title, Dancing, RidingOn, Sharing)
   wwwroot/
     index.html      Login (nome, gênero, cores, upload de imagem), chat, painel de online, HUD, bandeja de emotes, projeções
     game.js         TODO o cliente (Phaser 3 + SignalR + WebRTC). ~1.5k linhas, seções comentadas (veja abaixo)
     assets/         peças do boneco (+ dolls.json), fundos (fundo_10h/15h/18h.jpg), projecao.png/json
-tools/              build-doll-assets.js e build-projection-asset.js (geram os assets a partir de /Personagens; precisam de `npm i pngjs`)
+tools/              build-doll-assets.js, build-projection-asset.js e build-arena-assets.js (fundo da arena, placa, balão) (geram os assets a partir de /Personagens; precisam de `npm i pngjs`)
 Personagens/        arte-fonte enviada pelo dono (Homem/, Mulher/, background/, Compartilhar/). Não é usada em runtime.
 ```
 
@@ -47,6 +48,10 @@ Personagens/        arte-fonte enviada pelo dono (Homem/, Mulher/, background/, 
 - **Avisos do sistema** no chat (entrou, bebeu água...) somem em ~3 s (`addChatLine(null, texto, true)`); respostas de comandos (`say`) ficam. Mensagem de outro jogador toca `playPing()`.
 - **Torre:** dá para subir no topo de quem já carrega alguém, até 10 empilhados (`MaxTower` no servidor, `TOWER_MAX`/`chainDepth` no cliente).
 - **Pique-pega:** o pegador pisca todo em vermelho (`updateTagFlash`, boneco/imagem/GIF).
+- **Mapas:** `Player.Map` = `village` | `arena`. Segurar → no fim da rua (x ≥ ~1254) por 0,4 s leva à arena; segurar ← no começo da arena volta (`ChangeMap`). Fora do próprio mapa os jogadores ficam invisíveis (`syncVisibility`); ações sociais/pique só no mesmo mapa. Placa pequena (`placa_arena.png`) no vilarejo em x≈1135.
+- **Arena:** Espaço/X ataca, teclas 1–5 trocam de arma (Espada, Lança, Arco, Martelo, Garras; números no `Weapons` do servidor, mesma ordem do cliente), vida 100, +1 ponto por golpe e +10 por abate, respawn em 3 s com 2 s de imunidade. Ranking no canto superior esquerdo, vida/armas no topo ao centro; o botão ? mostra só a ajuda da arena enquanto se está nela. Efeitos e sons 16 bits desenhados/sintetizados por código (`swingFx`, `hitFx`, `sfxAttack`, `sfxHurt`...). Todos os sons seguem o botão 🔊/🔇.
+- **Dash:** dois toques rápidos na seta (≤250 ms), vale no ar; recarga 500 ms (`handleDash`).
+- **Balão de chat:** pergaminho (`assets/balao.png` + `balao.json`) em 3 partes, gerado por `tools/build-arena-assets.js`.
 - **Música ambiente:** gerada por WebAudio (sem arquivos), muda com o período do dia; enquanto alguém dança entra uma batida alegre (`setDanceMusic`) e a ambiente abaixa; `MUSIC_VOLUME` = 0.125; botão 🔊.
 - **Social:** títulos (Campeão do Pique-Pega, Cumprimentador, Dançarino) guardados no navegador; cor do nome; lista de online; aviso sonoro quando alguém entra.
 - **Chat de voz (WebRTC em malha):** botões 🎧 (entrar/sair) e 🎤 (mutar). Servidores ICE vêm de `GET /ice-servers` (STUN + TURN; credenciais próprias via variáveis `TURN_URLS`/`TURN_USERNAME`/`TURN_CREDENTIAL` no Render, senão usa o relay público Open Relay da Metered); fallback local `VOICE_ICE_SERVERS` (só STUN). Quem entra liga para quem já estava. Sinais por par são serializados, há tratamento de ofertas cruzadas e reinício de ICE; estados aparecem no console (`[voz]`). Volume cai com a distância; 🎙️ no nome de quem fala.
@@ -55,9 +60,10 @@ Personagens/        arte-fonte enviada pelo dono (Homem/, Mulher/, background/, 
 ## Protocolo SignalR (resumo)
 Cliente → servidor: `JoinGame(name, character)`, `UpdateProfile(nameColor, title)`, `UpdatePosition(x,y)`, `SendMessage`, `Emote(0–5)`,
 `Greet`, `Push`, `ToggleRide`, `SetDancing(bool)`, `Interact(spot)`, `StartTag`, `StopTag`, `JoinVoice`, `LeaveVoice`, `VoiceSignal(to, json)`,
-`StartShare`, `StopShare`, `ShareSignal(to, json)`.
+`StartShare`, `StopShare`, `ShareSignal(to, json)`, `ChangeMap(map)`, `SetWeapon(i)`, `Attack(dir)`, `Dash(dir)`.
 Servidor → cliente: `ExistingPlayers`, `PlayerJoined`, `PlayerMoved`, `PlayerLeft`, `PlayerProfile`, `ChatHistory`, `ChatMessage`, `SystemMessage` (aceita `\n`),
-`PlayerEmote(id, n)`, `Pushed(dir)`, `Riding(id, carrierId|null, x, y)`, `PlayerDance`, `TagState`, `TitleEarned`, `VoiceMembers`, `VoiceRoster`, `VoiceState`, `VoiceSignal`, `ShareState`, `ShareSignal`.
+`PlayerEmote(id, n)`, `Pushed(dir)`, `Riding(id, carrierId|null, x, y)`, `PlayerDance`, `TagState`, `TitleEarned`, `VoiceMembers`, `VoiceRoster`, `VoiceState`, `VoiceSignal`, `ShareState`, `ShareSignal`, `PlayerMap(id, map, x, y)`, `ArenaState(lista)`, `ArenaSwing`, `ArrowFired`, `ArenaHit`, `ArenaKill`, `PlayerDash`.
+**Atenção:** no servidor, para enviar vários argumentos montados num array use `SendCoreAsync(método, args)` (o `SendAsync(método, object[])` embrulha o array num único argumento).
 IDs de emote: 0–5 teclado; 6🖐️ 7🤝 8💢 9🎵; 20–26 pontos do vilarejo (a ordem de `SPOTS` no cliente e `Spots` no servidor **deve coincidir**).
 
 ## Regras/decisões importantes
