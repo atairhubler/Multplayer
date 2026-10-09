@@ -13,12 +13,13 @@
     .card { background: #222; padding: 28px 32px; border-radius: 10px; width: 300px; }
     .card h2 { margin-top: 0; }
     .card input[type=text] { width: 100%; box-sizing: border-box; padding: 8px; margin: 6px 0 14px; }
-    .avatars { display: flex; gap: 10px; margin: 6px 0 18px; }
-    .avatars label { cursor: pointer; }
-    .avatars input { display: none; }
-    .avatars span { display: block; width: 36px; height: 48px; border: 3px solid transparent; border-radius: 4px; }
-    .avatars input:checked + span { border-color: #fff; }
-    button { width: 100%; padding: 10px; font-size: 16px; cursor: pointer; }
+    .card { max-height: 94vh; overflow-y: auto; touch-action: pan-y; }
+    .builder { display: flex; gap: 12px; align-items: center; margin: 6px 0 14px; }
+    .builder .opts { flex: 1; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+    .builder .opts label { display: flex; justify-content: space-between; align-items: center; }
+    .builder input[type=color] { width: 44px; height: 26px; padding: 0; border: 1px solid #555; background: none; cursor: pointer; }
+    .gender { display: flex; gap: 12px; }
+    #dollPreview { width: 72px; height: 108px; background: #87ceeb; border-radius: 6px; flex: none; image-rendering: pixelated; }
     .upload { display: flex; align-items: center; gap: 10px; margin: 6px 0 18px; font-size: 12px; }
     .upload input { max-width: 190px; }
     #avatarPreview { width: 36px; height: 54px; object-fit: cover; border: 3px solid #fff; border-radius: 4px; }
@@ -65,11 +66,17 @@
       <label>Nome</label>
       <input id="name" type="text" maxlength="16" placeholder="Seu nome">
       <label>Personagem</label>
-      <div class="avatars">
-        <label><input type="radio" name="char" value="red" checked><span style="background:#e74c3c"></span></label>
-        <label><input type="radio" name="char" value="blue"><span style="background:#3498db"></span></label>
-        <label><input type="radio" name="char" value="green"><span style="background:#2ecc71"></span></label>
-        <label><input type="radio" name="char" value="yellow"><span style="background:#f1c40f"></span></label>
+      <div class="builder">
+        <div class="opts">
+          <div class="gender">
+            <label><input type="radio" name="gender" value="m" checked> Masculino</label>
+            <label><input type="radio" name="gender" value="f"> Feminino</label>
+          </div>
+          <label>Cabelo <input type="color" id="cHair" value="#4a2c17"></label>
+          <label>Pele <input type="color" id="cSkin" value="#f1c27d"></label>
+          <label>Roupa <input type="color" id="cCloth" value="#3498db"></label>
+        </div>
+        <canvas id="dollPreview" width="72" height="108"></canvas>
       </div>
       <label>Ou envie sua imagem</label>
       <div class="upload">

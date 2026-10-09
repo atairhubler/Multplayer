@@ -15,7 +15,7 @@ public class GameHub : Hub
     public async Task JoinGame(string name, string character)
     {
         var sprite = SanitizeCharacter(character);
-        if (AvatarPath.IsMatch(sprite) && !AvatarStore.Claim(sprite[9..], Context.ConnectionId)) sprite = "red";
+        if (AvatarPath.IsMatch(sprite) && !AvatarStore.Claim(sprite[9..], Context.ConnectionId)) sprite = DefaultCharacter;
 
         var player = new Player
         {
@@ -39,19 +39,22 @@ public class GameHub : Hub
         await Clients.OthersInGroup(Room).SendAsync("PlayerJoined", player);
     }
 
+    private const string DefaultCharacter = "char:m:4a2c17:f1c27d:3498db";
+    private static readonly Regex DollConfig = new(@"^char:[mf]:[0-9a-f]{6}:[0-9a-f]{6}:[0-9a-f]{6}$", RegexOptions.Compiled);
     private static readonly Regex AvatarPath = new(@"^/avatars/[0-9a-f]{32}$", RegexOptions.Compiled);
     private static readonly string[] Colors = { "red", "blue", "green", "yellow" };
     private static readonly Regex ImageDataUrl = new(@"^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$", RegexOptions.Compiled);
     private const int MaxImageChars = 40_000;
 
-    // Aceita uma cor conhecida ou uma imagem pequena em data URL; qualquer outra coisa vira "red"
+    // Aceita uma cor conhecida ou uma imagem pequena em data URL; qualquer outra coisa vira o boneco padrão
     private static string SanitizeCharacter(string? character)
     {
-        if (character is null) return "red";
+        if (character is null) return DefaultCharacter;
+        if (DollConfig.IsMatch(character)) return character; // boneco: gênero + cores de cabelo/pele/roupa
         if (Colors.Contains(character)) return character;
         if (character.Length <= MaxImageChars && ImageDataUrl.IsMatch(character)) return character;
         if (AvatarPath.IsMatch(character)) return character; // dono é verificado em JoinGame
-        return "red";
+        return DefaultCharacter;
     }
 
     public async Task SendMessage(string text)
