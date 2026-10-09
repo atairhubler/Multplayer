@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: plataforma-multiplayer
+    runtime: docker
+    plan: free
+    rootDir: Server
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: ALLOWED_ORIGINS
+        sync: false   # defina no painel: https://SEU-USUARIO.github.io

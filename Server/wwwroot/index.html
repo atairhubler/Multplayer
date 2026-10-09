@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Plataforma Multiplayer PoC</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #111; font-family: sans-serif; color: #fff; }
+    #login {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,.85); z-index: 10;
+    }
+    .card { background: #222; padding: 28px 32px; border-radius: 10px; width: 300px; }
+    .card h2 { margin-top: 0; }
+    .card input[type=text] { width: 100%; box-sizing: border-box; padding: 8px; margin: 6px 0 14px; }
+    .avatars { display: flex; gap: 10px; margin: 6px 0 18px; }
+    .avatars label { cursor: pointer; }
+    .avatars input { display: none; }
+    .avatars span { display: block; width: 36px; height: 48px; border: 3px solid transparent; border-radius: 4px; }
+    .avatars input:checked + span { border-color: #fff; }
+    button { width: 100%; padding: 10px; font-size: 16px; cursor: pointer; }
+    #error { color: #f77; margin-top: 10px; min-height: 18px; font-size: 13px; }
+    #game { display: flex; justify-content: center; }
+  </style>
+</head>
+<body>
+  <div id="login">
+    <div class="card">
+      <h2>Entrar no Jogo</h2>
+      <label>Nome</label>
+      <input id="name" type="text" maxlength="16" placeholder="Seu nome">
+      <label>Personagem</label>
+      <div class="avatars">
+        <label><input type="radio" name="char" value="red" checked><span style="background:#e74c3c"></span></label>
+        <label><input type="radio" name="char" value="blue"><span style="background:#3498db"></span></label>
+        <label><input type="radio" name="char" value="green"><span style="background:#2ecc71"></span></label>
+        <label><input type="radio" name="char" value="yellow"><span style="background:#f1c40f"></span></label>
+      </div>
+      <button id="join">Entrar no Jogo</button>
+      <div id="error"></div>
+    </div>
+  </div>
+  <div id="game"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@8.0.7/dist/browser/signalr.min.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
