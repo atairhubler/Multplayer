@@ -1,0 +1,123 @@
+{
+ "m": [
+  {
+   "id": "armFar",
+   "file": "m_armFar.png",
+   "x": -2.78,
+   "y": -1.6,
+   "ox": 0.614,
+   "oy": 0.094,
+   "scale": 0.3301
+  },
+  {
+   "id": "legFar",
+   "file": "m_legFar.png",
+   "x": -2.24,
+   "y": 6.37,
+   "ox": 0.353,
+   "oy": 0.069,
+   "scale": 0.3301
+  },
+  {
+   "id": "legNear",
+   "file": "m_legNear.png",
+   "x": -2.24,
+   "y": 6.37,
+   "ox": 0.353,
+   "oy": 0.069,
+   "scale": 0.3301
+  },
+  {
+   "id": "torso",
+   "file": "m_torso.png",
+   "x": -0.06,
+   "y": 4.37,
+   "ox": 0.492,
+   "oy": 0.497,
+   "scale": 0.2913
+  },
+  {
+   "id": "head",
+   "file": "m_head.png",
+   "x": 0.54,
+   "y": -1.57,
+   "ox": 0.517,
+   "oy": 0.965,
+   "scale": 0.3689
+  },
+  {
+   "id": "armNear",
+   "file": "m_armNear.png",
+   "x": -2.78,
+   "y": -1.6,
+   "ox": 0.614,
+   "oy": 0.094,
+   "scale": 0.3301
+  }
+ ],
+ "f": [
+  {
+   "id": "armFar",
+   "file": "f_armFar.png",
+   "x": -3.15,
+   "y": -1.66,
+   "ox": 0.6,
+   "oy": 0.096,
+   "scale": 0.3495
+  },
+  {
+   "id": "legFar",
+   "file": "f_legFar.png",
+   "x": -2.66,
+   "y": 14.29,
+   "ox": 0.475,
+   "oy": 0.077,
+   "scale": 0.3495
+  },
+  {
+   "id": "legNear",
+   "file": "f_legNear.png",
+   "x": 2.79,
+   "y": 14.29,
+   "ox": 0.475,
+   "oy": 0.077,
+   "scale": 0.3495
+  },
+  {
+   "id": "torso",
+   "file": "f_torso.png",
+   "x": -0.05,
+   "y": 2.37,
+   "ox": 0.493,
+   "oy": 0.5,
+   "scale": 0.2718
+  },
+  {
+   "id": "shorts",
+   "file": "f_shorts.png",
+   "x": -0.57,
+   "y": 9.19,
+   "ox": 0.486,
+   "oy": 0.497,
+   "scale": 0.3495
+  },
+  {
+   "id": "head",
+   "file": "f_head.png",
+   "x": -0.59,
+   "y": 0.08,
+   "ox": 0.633,
+   "oy": 0.816,
+   "scale": 0.3883
+  },
+  {
+   "id": "armNear",
+   "file": "f_armNear.png",
+   "x": -3.15,
+   "y": -1.66,
+   "ox": 0.6,
+   "oy": 0.096,
+   "scale": 0.3495
+  }
+ ]
+}

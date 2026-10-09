@@ -112,6 +112,10 @@ document.getElementById('join').addEventListener('click', async () => {
   const errorEl = document.getElementById('error');
   errorEl.textContent = '';
   const joinBtn = document.getElementById('join');
+  try { await dollAssetsReady; } catch {
+    errorEl.textContent = 'Não foi possível carregar as imagens do personagem.';
+    return;
+  }
 
   if (customImage && customImage.startsWith('data:image/gif')) {
     // GIF animado: sobe o arquivo e usa só a URL devolvida pelo servidor
@@ -447,95 +451,108 @@ chatBar.addEventListener('submit', e => {
 });
 document.getElementById('talkBtn').addEventListener('click', () => { if (chatReady) openChatBar(); });
 
-// ---- Boneco desenhado por código (masculino/feminino, cores personalizáveis) ----
-// Cada parte é uma lista de formas desenhadas em torno de um pivô; o mesmo desenho
-// serve para o jogo (Phaser) e para a pré-visualização do login (canvas 2D).
-function shade(hex, f) {
-  const n = parseInt(hex.slice(1), 16);
-  const c = s => Math.max(0, Math.min(255, Math.round(((n >> s) & 255) * f)));
-  return '#' + [16, 8, 0].map(s => c(s).toString(16).padStart(2, '0')).join('');
-}
+// ---- Boneco montado com as imagens (peças recortadas, recoloridas por zona de cor) ----
+// As imagens originais usam cores-chave: pele = laranja, cabelo = azul, roupa = verde.
+// Cada pixel dessas zonas troca de matiz/cor pela escolha do usuário, mantendo o sombreado.
+// Posições/pivôs das peças vêm de assets/dolls.json (gerado por tools/build-doll-assets.js).
+const ASSET_DIR = 'assets/';
+let dollLayout = null;
+const dollImages = {};
+const dollAssetsReady = (async () => {
+  dollLayout = await (await fetch(ASSET_DIR + 'dolls.json')).json();
+  await Promise.all(Object.values(dollLayout).flat().map(p => new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => { dollImages[p.file] = img; resolve(); };
+    img.onerror = reject;
+    img.src = ASSET_DIR + p.file;
+  })));
+})();
 
 function parseDoll(config) {
   const [, g, hair, skin, cloth] = config.split(':');
   return { female: g === 'f', hair: '#' + hair, skin: '#' + skin, cloth: '#' + cloth };
 }
 
-// Posições relativas ao centro do personagem (32x48). Ordem = do fundo para a frente.
-function dollParts(cfg) {
-  const { female, hair, skin, cloth } = cfg;
-  const skinD = shade(skin, 0.82), clothD = shade(cloth, 0.8), hairD = shade(hair, 0.85), shoe = '#2b2b2b';
-  const arm = (sk, cl) => [
-    ['rect', -2, 0, 4, 11, sk], ['rect', -2, 0, 4, 5, cl], ['ellipse', 0, 11, 4.5, 4.5, sk]];
-  const leg = (sk, cl) => [
-    ['rect', -2.5, 0, 5, 14, female ? sk : cl], ['rect', -2.5, 14, 7, 4, shoe]];
-  const parts = [
-    { id: 'armFar', px: 0, py: -3, ops: arm(skinD, clothD) },
-    { id: 'legFar', px: 0, py: 6, ops: leg(skinD, clothD) },
-  ];
-  if (female) parts.push({ id: 'tail', px: -7, py: -17, ops: [['ellipse', -3, 5, 6, 13, hair]] });
-  parts.push(
-    { id: 'torso', px: 0, py: 0, ops: [
-      ['rect', -2, -7, 4, 3, skin],                          // pescoço
-      ['rect', -6, -5, 12, 12, cloth],
-      ...(female ? [['poly', [[-6, 3], [6, 3], [9, 12], [-9, 12]], cloth]] : [['rect', -6, 5, 12, 2, clothD]]),
-    ] },
-    { id: 'legNear', px: 0, py: 6, ops: leg(skin, cloth) },
-    { id: 'head', px: 0, py: -14, ops: [
-      ['circle', 0, 0, 9, skin], ['ellipse', 4, -1, 2, 3.2, '#222'], ['circle', -1, 1, 1.8, skinD]] },
-    { id: 'hair', px: 0, py: -14, ops: [
-      ['halfTop', 0, -1, 10.5, hair],
-      ['rect', -10.5, -1, 6, female ? 12 : 7, hair],
-      ['poly', [[3, -10], [10, -4], [10, -1], [4, -5]], hair]] },
-    { id: 'armNear', px: 0, py: -3, ops: arm(skin, cloth) },
-  );
-  return parts;
+function rgbToHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn, l = (mx + mn) / 2;
+  if (!d) return [0, 0, l];
+  const sat = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+  const h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [h * 60, sat, l];
 }
 
-function drawOpsPhaser(g, ops) {
-  const col = c => parseInt(c.slice(1), 16);
-  for (const [t, ...a] of ops) {
-    if (t === 'rect') g.fillStyle(col(a[4])).fillRect(a[0], a[1], a[2], a[3]);
-    else if (t === 'ellipse') g.fillStyle(col(a[4])).fillEllipse(a[0], a[1], a[2], a[3]);
-    else if (t === 'circle') g.fillStyle(col(a[3])).fillCircle(a[0], a[1], a[2]);
-    else if (t === 'poly') g.fillStyle(col(a[1])).fillPoints(a[0].map(([x, y]) => ({ x, y })), true);
-    else if (t === 'halfTop') { g.fillStyle(col(a[3])).beginPath().slice(a[0], a[1], a[2], Math.PI, 2 * Math.PI, false).closePath().fillPath(); }
-  }
+function hslToRgb(h, sat, l) {
+  const c = (1 - Math.abs(2 * l - 1)) * sat, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = l - c / 2;
+  const [r, g, b] = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x] : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+  return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
 }
 
-function drawOpsCanvas(ctx, ops) {
-  for (const [t, ...a] of ops) {
-    if (t === 'rect') { ctx.fillStyle = a[4]; ctx.fillRect(a[0], a[1], a[2], a[3]); }
-    else if (t === 'ellipse') { ctx.fillStyle = a[4]; ctx.beginPath(); ctx.ellipse(a[0], a[1], a[2] / 2, a[3] / 2, 0, 0, 2 * Math.PI); ctx.fill(); }
-    else if (t === 'circle') { ctx.fillStyle = a[3]; ctx.beginPath(); ctx.arc(a[0], a[1], a[2], 0, 2 * Math.PI); ctx.fill(); }
-    else if (t === 'poly') { ctx.fillStyle = a[1]; ctx.beginPath(); a[0].forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.closePath(); ctx.fill(); }
-    else if (t === 'halfTop') { ctx.fillStyle = a[3]; ctx.beginPath(); ctx.arc(a[0], a[1], a[2], Math.PI, 2 * Math.PI); ctx.closePath(); ctx.fill(); }
+const hexToHsl = hex => { const n = parseInt(hex.slice(1), 16); return rgbToHsl(n >> 16, (n >> 8) & 255, n & 255); };
+
+// Zonas de cor das imagens originais: faixa de matiz e luminosidade média (base do sombreado)
+const ZONES = [
+  { key: 'skin', from: 8, to: 55, base: 0.5 },
+  { key: 'cloth', from: 95, to: 175, base: 0.31 },
+  { key: 'hair', from: 190, to: 255, base: 0.44 },
+];
+
+const recolorCache = {};
+function recoloredPart(file, cfg) {
+  const id = [file, cfg.hair, cfg.skin, cfg.cloth].join('|');
+  if (recolorCache[id]) return recolorCache[id];
+  const img = dollImages[file];
+  const canvas = document.createElement('canvas');
+  canvas.width = img.width; canvas.height = img.height;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0);
+  const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const px = data.data;
+  const target = { skin: hexToHsl(cfg.skin), cloth: hexToHsl(cfg.cloth), hair: hexToHsl(cfg.hair) };
+  for (let i = 0; i < px.length; i += 4) {
+    if (px[i + 3] === 0) continue;
+    const [h, sat, l] = rgbToHsl(px[i], px[i + 1], px[i + 2]);
+    if (sat < 0.4 || l < 0.1) continue; // contorno, cinza (sapatos), branco dos olhos: não mexe
+    const zone = ZONES.find(z => h >= z.from && h <= z.to);
+    if (!zone) continue;
+    const [th, ts, tl] = target[zone.key];
+    const nl = Math.max(0.04, Math.min(0.96, tl + (l - zone.base)));
+    const [r, g, b] = hslToRgb(th, ts, nl);
+    px[i] = r; px[i + 1] = g; px[i + 2] = b;
   }
+  ctx.putImageData(data, 0, 0);
+  return (recolorCache[id] = canvas);
 }
 
 // Pré-visualização estática no login
-function drawDollPreview(canvas, config) {
+async function drawDollPreview(canvas, config) {
+  await dollAssetsReady;
+  const cfg = parseDoll(config);
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.save();
-  ctx.scale(canvas.width / 32 * 0.9, canvas.height / 48 * 0.9);
-  ctx.translate(16 / 0.9, 24.5 / 0.9);
-  for (const p of dollParts(parseDoll(config))) {
-    ctx.save(); ctx.translate(p.px, p.py); drawOpsCanvas(ctx, p.ops); ctx.restore();
+  const S = canvas.height / 62, cx = canvas.width / 2 + 4 * S, cy = canvas.height / 2;
+  for (const p of dollLayout[cfg.female ? 'f' : 'm']) {
+    const c = recoloredPart(p.file, cfg);
+    const dw = c.width * p.scale * S, dh = c.height * p.scale * S;
+    ctx.save();
+    if (p.id.endsWith('Far')) ctx.filter = 'brightness(0.8)';
+    ctx.drawImage(c, cx + p.x * S - p.ox * dw, cy + p.y * S - p.oy * dh, dw, dh);
+    ctx.restore();
   }
-  ctx.restore();
 }
 
-// Boneco animado no Phaser: contêiner (vira para o lado) > partes com pivôs nas articulações
+// Boneco animado no Phaser: contêiner (vira para o lado) > peças com pivô nas articulações
 function createDoll(scene, config) {
   const cfg = parseDoll(config);
   const rig = scene.add.container(0, 0);
   const part = {};
-  for (const p of dollParts(cfg)) {
-    const g = scene.add.graphics({ x: p.px, y: p.py });
-    drawOpsPhaser(g, p.ops);
-    rig.add(g);
-    part[p.id] = g;
+  for (const p of dollLayout[cfg.female ? 'f' : 'm']) {
+    const key = ['doll', p.file, cfg.hair, cfg.skin, cfg.cloth].join('|');
+    if (!scene.textures.exists(key)) scene.textures.addCanvas(key, recoloredPart(p.file, cfg));
+    const img = scene.add.image(p.x, p.y, key).setOrigin(p.ox, p.oy).setScale(p.scale);
+    if (p.id.endsWith('Far')) img.setTint(0xc8c8c8); // membros do lado de trás ficam mais escuros
+    rig.add(img);
+    part[p.id] = img;
   }
   const doll = scene.add.container(0, 0, [rig]);
   let phase = 0, dir = 1;
@@ -543,21 +560,20 @@ function createDoll(scene, config) {
   doll.animate = (moving, air, vx, dt = 16) => {
     if (Math.abs(vx) > 0.5) dir = vx > 0 ? 1 : -1;
     doll.scaleX = dir;
-    let aN = 0, aF = 0, lN = 0, lF = 0, bob = 0, tail = 0;
-    if (air) { lN = -0.7; lF = 0.5; aN = -2.3; aF = -1.9; tail = 0.5; }
+    let aN = 0, aF = 0, lN = 0, lF = 0, bob = 0;
+    if (air) { lN = -0.7; lF = 0.5; aN = -2.3; aF = -1.9; }
     else if (moving) {
       phase += dt * 0.014;
-      const s = Math.sin(phase);
-      lN = s * 0.8; lF = -s * 0.8; aN = -s * 0.9; aF = s * 0.9;
-      bob = -Math.abs(Math.cos(phase)) * 1.8; tail = 0.2 + Math.sin(phase + 1) * 0.3;
+      const sw = Math.sin(phase);
+      lN = sw * 0.8; lF = -sw * 0.8; aN = -sw * 0.9; aF = sw * 0.9;
+      bob = -Math.abs(Math.cos(phase)) * 1.2;
     } else {
-      bob = Math.sin(scene.time.now * 0.004) * 0.5;
+      bob = Math.sin(scene.time.now * 0.004) * 0.4;
     }
     const k = 1 - Math.exp(-dt * 0.02); // suaviza a transição entre poses
     const ease = (obj, target) => { obj.rotation += (target - obj.rotation) * k; };
     ease(part.armNear, aN); ease(part.armFar, aF);
     ease(part.legNear, lN); ease(part.legFar, lF);
-    if (part.tail) ease(part.tail, tail);
     rig.y += (bob - rig.y) * k;
   };
   return doll;
