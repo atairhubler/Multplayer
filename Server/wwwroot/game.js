@@ -4,6 +4,7 @@ const SERVER_URL = location.hostname.endsWith('github.io') ? PRODUCTION_URL
   : location.protocol.startsWith('http') ? location.origin : 'http://localhost:5000';
 
 const COLORS = { red: 0xe74c3c, blue: 0x3498db, green: 0x2ecc71, yellow: 0xf1c40f };
+const WORLD_W = 1280, VIEW_H = 600; // mundo fixo; a câmera mostra uma janela dele
 const SEND_INTERVAL_MS = 50; // throttle: ~20 envios/s
 
 let connection;
@@ -36,7 +37,7 @@ function startPhaser() {
   new Phaser.Game({
     type: Phaser.AUTO,
     parent: 'game',
-    width: 800,
+    width: Math.round(Phaser.Math.Clamp(VIEW_H * innerWidth / innerHeight, 800, WORLD_W)),
     height: 600,
     backgroundColor: '#87ceeb',
     physics: { default: 'arcade', arcade: { gravity: { y: 800 }, debug: false } },
@@ -71,10 +72,12 @@ function create() {
     this.physics.add.existing(r, true);
     platforms.add(r);
   };
-  addPlatform(400, 580, 800, 40, 0x228b22); // chão
+  addPlatform(WORLD_W / 2, 580, WORLD_W, 40, 0x228b22); // chão
   addPlatform(200, 450, 200, 20, 0x8b5a2b);
   addPlatform(520, 340, 200, 20, 0x8b5a2b);
   addPlatform(150, 220, 160, 20, 0x8b5a2b);
+  addPlatform(850, 450, 200, 20, 0x8b5a2b);
+  addPlatform(1100, 320, 200, 20, 0x8b5a2b);
 
   // Jogador local
   player = makeRect(this, COLORS[myCharacter]);
@@ -85,6 +88,10 @@ function create() {
   nameLabel = this.add.text(0, 0, myName, {
     fontSize: '14px', color: '#fff', stroke: '#000', strokeThickness: 3
   }).setOrigin(0.5);
+
+  this.physics.world.setBounds(0, 0, WORLD_W, VIEW_H);
+  this.cameras.main.setBounds(0, 0, WORLD_W, VIEW_H);
+  this.cameras.main.startFollow(player, true, 0.15, 0.15);
 
   cursors = this.input.keyboard.createCursorKeys();
 
