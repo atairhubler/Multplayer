@@ -4,7 +4,7 @@ const SERVER_URL = location.hostname.endsWith('github.io') ? PRODUCTION_URL
   : location.protocol.startsWith('http') ? location.origin : 'http://localhost:5000';
 
 const COLORS = { red: 0xe74c3c, blue: 0x3498db, green: 0x2ecc71, yellow: 0xf1c40f };
-const WORLD_W = 1280, VIEW_H = 600; // mundo fixo; a câmera mostra uma janela dele
+const WORLD_W = 1280, VIEW_H = 600; // mapa inteiro sempre visível (escala FIT)
 const SEND_INTERVAL_MS = 50; // throttle: ~20 envios/s
 
 let connection;
@@ -37,8 +37,8 @@ function startPhaser() {
   new Phaser.Game({
     type: Phaser.AUTO,
     parent: 'game',
-    width: Math.round(Phaser.Math.Clamp(VIEW_H * innerWidth / innerHeight, 800, WORLD_W)),
-    height: 600,
+    width: WORLD_W,
+    height: VIEW_H,
     backgroundColor: '#87ceeb',
     physics: { default: 'arcade', arcade: { gravity: { y: 800 }, debug: false } },
     scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
@@ -90,8 +90,6 @@ function create() {
   }).setOrigin(0.5);
 
   this.physics.world.setBounds(0, 0, WORLD_W, VIEW_H);
-  this.cameras.main.setBounds(0, 0, WORLD_W, VIEW_H);
-  this.cameras.main.startFollow(player, true, 0.15, 0.15);
 
   cursors = this.input.keyboard.createCursorKeys();
 
