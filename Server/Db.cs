@@ -87,6 +87,10 @@ public sealed class Db
                 equipped_title text,
                 updated_at     timestamptz NOT NULL DEFAULT now()
             );
+
+            -- colunas acrescentadas depois (rodar de novo não faz mal)
+            ALTER TABLE account_stats ADD COLUMN IF NOT EXISTS coins bigint NOT NULL DEFAULT 0;   -- moedas (drops dos slimes)
+            ALTER TABLE account_profile ADD COLUMN IF NOT EXISTS character text;                    -- aparência do boneco (char:m|f:cabelo:pele:roupa)
             """);
         await cmd.ExecuteNonQueryAsync();
     }
@@ -111,16 +115,17 @@ public sealed class Db
         return new Account(r.GetInt64(0), r.GetString(1), r.IsDBNull(2) ? null : r.GetString(2));
     }
 
-    public async Task AddStatsAsync(long accountId, long points, int playerKills, int slimeKills, int deaths)
+    public async Task AddStatsAsync(long accountId, long points, int playerKills, int slimeKills, int deaths, long coins)
     {
         await using var cmd = Source.CreateCommand("""
-            INSERT INTO account_stats (account_id, points, player_kills, slime_kills, deaths)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO account_stats (account_id, points, player_kills, slime_kills, deaths, coins)
+            VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT (account_id) DO UPDATE
                 SET points = account_stats.points + EXCLUDED.points,
                     player_kills = account_stats.player_kills + EXCLUDED.player_kills,
                     slime_kills = account_stats.slime_kills + EXCLUDED.slime_kills,
                     deaths = account_stats.deaths + EXCLUDED.deaths,
+                    coins = account_stats.coins + EXCLUDED.coins,
                     updated_at = now()
             """);
         cmd.Parameters.AddWithValue(accountId);
@@ -128,6 +133,19 @@ public sealed class Db
         cmd.Parameters.AddWithValue(playerKills);
         cmd.Parameters.AddWithValue(slimeKills);
         cmd.Parameters.AddWithValue(deaths);
+        cmd.Parameters.AddWithValue(coins);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    // Guarda a aparência do boneco (só bonecos "char:", nunca imagens/GIFs) sem mexer na cor do nome nem no título
+    public async Task SaveCharacterAsync(long accountId, string character)
+    {
+        await using var cmd = Source.CreateCommand("""
+            INSERT INTO account_profile (account_id, character) VALUES ($1, $2)
+            ON CONFLICT (account_id) DO UPDATE SET character = EXCLUDED.character, updated_at = now()
+            """);
+        cmd.Parameters.AddWithValue(accountId);
+        cmd.Parameters.AddWithValue(character);
         await cmd.ExecuteNonQueryAsync();
     }
 
@@ -153,14 +171,14 @@ public sealed class Db
 
     public async Task<AccountData> LoadAccountDataAsync(long accountId)
     {
-        var stats = new AccountStats(0, 0, 0, 0);
+        var stats = new AccountStats(0, 0, 0, 0, 0);
         var titles = new List<string>();
-        string? color = null, equipped = null;
-        await using (var cmd = Source.CreateCommand("SELECT points, player_kills, slime_kills, deaths FROM account_stats WHERE account_id = $1"))
+        string? color = null, equipped = null, character = null;
+        await using (var cmd = Source.CreateCommand("SELECT points, player_kills, slime_kills, deaths, coins FROM account_stats WHERE account_id = $1"))
         {
             cmd.Parameters.AddWithValue(accountId);
             await using var r = await cmd.ExecuteReaderAsync();
-            if (await r.ReadAsync()) stats = new AccountStats(r.GetInt64(0), r.GetInt32(1), r.GetInt32(2), r.GetInt32(3));
+            if (await r.ReadAsync()) stats = new AccountStats(r.GetInt64(0), r.GetInt32(1), r.GetInt32(2), r.GetInt32(3), r.GetInt64(4));
         }
         await using (var cmd = Source.CreateCommand("SELECT title FROM account_titles WHERE account_id = $1 ORDER BY earned_at"))
         {
@@ -168,13 +186,18 @@ public sealed class Db
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync()) titles.Add(r.GetString(0));
         }
-        await using (var cmd = Source.CreateCommand("SELECT name_color, equipped_title FROM account_profile WHERE account_id = $1"))
+        await using (var cmd = Source.CreateCommand("SELECT name_color, equipped_title, character FROM account_profile WHERE account_id = $1"))
         {
             cmd.Parameters.AddWithValue(accountId);
             await using var r = await cmd.ExecuteReaderAsync();
-            if (await r.ReadAsync()) { color = r.IsDBNull(0) ? null : r.GetString(0); equipped = r.IsDBNull(1) ? null : r.GetString(1); }
+            if (await r.ReadAsync())
+            {
+                color = r.IsDBNull(0) ? null : r.GetString(0);
+                equipped = r.IsDBNull(1) ? null : r.GetString(1);
+                character = r.IsDBNull(2) ? null : r.GetString(2);
+            }
         }
-        return new AccountData(stats, titles, color, equipped);
+        return new AccountData(stats, titles, color, equipped, character);
     }
 
     // Ranking permanente: quem tem mais pontos de combate

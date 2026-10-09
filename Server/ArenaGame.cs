@@ -39,6 +39,32 @@ public static class ArenaGame
     private class Slime { public int Id, Level, MaxHp = SlimeHp; public float X, Hop, Mult = 1; public int Hp = SlimeHp, Dir = 1; public double Phase; public long NextTurnAt, RespawnAt; public bool Alive; }
     private static float SlimeCenterY(Slime s) => 594 - SlimeHalfH * s.Mult - s.Hop; // y do centro do corpo (o chão fica em 594)
 
+    // Moedas que caem dos slimes derrotados: ficam no chão por um tempo e quem encostar primeiro leva
+    private class Coin { public int Id, Value; public float X; public long ExpireAt; }
+    private const int CoinLifeMs = 45_000, MaxCoinsOnGround = 120;
+    private const float CoinPickupX = 42, CoinPickupY = 95; // alcance (px) em torno do jogador
+    private static readonly List<Coin> Coins = new();
+    private static int _nextCoin;
+    private static object CoinSnapshot() => Coins.Select(c => new { id = c.Id, x = c.X, v = c.Value }).ToList();
+
+    // Quanto e quantas moedas um slime solta: 3 × o tamanho no total (3 no slime normal, 30 no de 10x), em 2 a 8 moedas
+    private static void DropCoins(Slime sl, long now, List<(string, object?[])> events)
+    {
+        var total = Math.Max(3, (int)(3 * sl.Mult));
+        var n = Math.Min(8, 2 + sl.Level * 2);
+        var dropped = new List<object>();
+        for (var i = 0; i < n; i++)
+        {
+            var value = total / n + (i < total % n ? 1 : 0);
+            if (value <= 0) continue;
+            var c = new Coin { Id = ++_nextCoin, Value = value, X = Math.Clamp(sl.X + (float)(Rng.NextDouble() * 120 - 60), 40, ForestW - 40), ExpireAt = now + CoinLifeMs };
+            Coins.Add(c);
+            dropped.Add(new { id = c.Id, x = c.X, v = c.Value, from = sl.X });
+        }
+        while (Coins.Count > MaxCoinsOnGround) Coins.RemoveAt(0);
+        events.Add(("CoinsDropped", new object?[] { dropped }));
+    }
+
     private static readonly object Gate = new();
     private static readonly Dictionary<string, State> InCombat = new();
     private static readonly Dictionary<string, int> Scores = new(); // a pontuação fica enquanto o jogador estiver conectado
@@ -83,8 +109,9 @@ public static class ArenaGame
         if (map == ForestMap)
         {
             await hub.Groups.AddToGroupAsync(id, ForestGroup);
-            object snap; lock (Gate) snap = SlimeSnapshot();
+            object snap, coinSnap; lock (Gate) { snap = SlimeSnapshot(); coinSnap = CoinSnapshot(); }
             await hub.Clients.Client(id).SendAsync("SlimeState", snap);
+            await hub.Clients.Client(id).SendAsync("CoinState", coinSnap);
         }
         await BroadcastState(hub);
     }
@@ -217,6 +244,7 @@ public static class ArenaGame
             attacker.Score += (int)(SlimeKillPoints * sl.Mult); // slime evoluído vale mais
             Progress.Add(attackerId, points: (int)(SlimeKillPoints * sl.Mult), slimeKills: 1);
             events.Add(("ArenaKill", new object?[] { attackerId, slimeId, sl.Level }));
+            DropCoins(sl, now, events);
         }
         Scores[attackerId] = attacker.Score;
     }
@@ -346,12 +374,28 @@ public static class ArenaGame
                         }
                     }
                     if (now - lastSlimeSend >= 100) { lastSlimeSend = now; slimeSnap = SlimeSnapshot(); }
+
+                    // moedas: quem encostar leva; as que ninguém pegou somem depois de 45 s
+                    for (var i = Coins.Count - 1; i >= 0; i--)
+                    {
+                        var coin = Coins[i];
+                        if (now >= coin.ExpireAt) { events.Add(("CoinTaken", new object?[] { coin.Id, null, 0 })); Coins.RemoveAt(i); continue; }
+                        foreach (var (pid, pst) in forest)
+                        {
+                            if (!pst.Alive || !GameHub.Players.TryGetValue(pid, out var p)) continue;
+                            if (Math.Abs(p.X - coin.X) > CoinPickupX || Math.Abs(p.Y - 560) > CoinPickupY) continue;
+                            Progress.Add(pid, coins: coin.Value);
+                            events.Add(("CoinTaken", new object?[] { coin.Id, pid, coin.Value }));
+                            Coins.RemoveAt(i);
+                            break;
+                        }
+                    }
                 }
             }
 
             foreach (var (m, a) in events)
             {
-                if (m == "SystemMessage") await hub.Clients.Group(ForestGroup).SendAsync(m, a[0]);
+                if (m is "SystemMessage" or "CoinsDropped" or "CoinTaken") await hub.Clients.Group(ForestGroup).SendCoreAsync(m, a); // só quem está na floresta
                 else await Send(hub, m, a);
             }
             foreach (var id in sentHome)

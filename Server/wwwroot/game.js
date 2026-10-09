@@ -149,6 +149,20 @@ function clearAccount() {
   try { localStorage.removeItem('session'); localStorage.removeItem('accountName'); } catch {}
   showAccount();
 }
+// Aparência salva na conta: preenche gênero, cores do boneco e cor do nome na tela de entrada (se for um boneco "char:", não imagem/GIF)
+function applySavedLook(character, nameColor) {
+  if (typeof character === 'string' && /^char:[mf]:[0-9a-f]{6}:[0-9a-f]{6}:[0-9a-f]{6}$/.test(character)) {
+    const [, g, hair, skin, cloth] = character.split(':');
+    document.querySelector('input[name=gender][value=' + g + ']').checked = true;
+    document.getElementById('cHair').value = '#' + hair;
+    document.getElementById('cSkin').value = '#' + skin;
+    document.getElementById('cCloth').value = '#' + cloth;
+    customImage = null; preview.hidden = true; fileInput.value = ''; dollPreview.hidden = false;
+    drawDollPreview(dollPreview, currentDollConfig());
+  }
+  if (typeof nameColor === 'string' && /^#[0-9a-f]{6}$/i.test(nameColor)) document.getElementById('cName').value = nameColor.toLowerCase();
+}
+
 async function onGoogleCredential(resp) {
   const errorEl = document.getElementById('error');
   errorEl.textContent = 'Entrando com o Google... (se o servidor estava dormindo, pode levar ~1 min)';
@@ -162,6 +176,7 @@ async function onGoogleCredential(resp) {
     try { localStorage.setItem('session', sessionToken); localStorage.setItem('accountName', accountName || ''); } catch {}
     const nameInput = document.getElementById('name');
     if (!nameInput.value.trim() && accountName) nameInput.value = accountName;
+    applySavedLook(data.account?.character, data.account?.nameColor); // o mesmo personagem em qualquer aparelho
     errorEl.textContent = '';
     showAccount();
   } catch (e) {
@@ -647,6 +662,7 @@ function update(time, delta) {
   safe(positionChat);
   if (currentMap === 'village') safe(() => updateBackground(this, time));
   safe(updateSlimes);
+  safe(updateCoins);
   safe(updateUi);
   if ((frameCount = (frameCount || 0) + 1) % 6 === 0) safe(updateMinimap);
   safe(updateHeldWeapons);
@@ -2794,6 +2810,9 @@ function setupArenaEvents() {
   });
   connection.on('ArrowFired', (arrowId, owner, x, y, dir) => { if (isCombat() && isHere(owner)) spawnArrow(arrowId, x, y, dir); });
   connection.on('SlimeState', list => syncSlimes(list));
+  connection.on('CoinState', list => syncCoins(list));
+  connection.on('CoinsDropped', list => dropCoinsFx(list));
+  connection.on('CoinTaken', (id, pid, value) => coinTaken(id, pid, value));
 
   connection.on('ArenaHit', (attackerId, victimId, dmg, hp, dir, knock, lift, arrowId) => {
     if (arrowId && arrows[arrowId]) { arrows[arrowId].g.destroy(); delete arrows[arrowId]; }
@@ -2857,6 +2876,7 @@ Object.assign(HELP, {
   floresta: [
     '🌲 Floresta: ande até o fim da rua, à esquerda (onde está a placa), e segure ← por um instante. É grande (a tela acompanha você), tem música heroica e muitos slimes 🟢 para derrotar. A faixa no topo mostra onde estão você (amarelo), os amigos (branco) e os slimes.',
     'Lá você tem vida (100), escolhe a arma com as teclas 1 a 5 e ataca com Espaço ou X, como na arena — mas os jogadores NÃO se machucam entre si, só os slimes. Slime derrotado dá +5 pontos e volta depois de um tempo.',
+    '🪙 Moedas: todo slime derrotado solta moedas no chão (quanto maior o slime, mais moedas). Ande até elas para pegar; quem encostar primeiro leva, e elas somem em 45 segundos. O total aparece ao lado dos pontos e fica salvo na sua conta Google.',
     'Cuidado: cada jogador que um slime derrota faz ele dobrar de tamanho, vida e dano (até 10x) e mudar de cor — verde, azul, amarelo, laranja e roxo. Derrotar um slime grande vale mais pontos (5 × o tamanho). Encostar num slime tira vida. Se a vida acabar, você volta para a cidade principal depois de 3 segundos. Para voltar ao vilarejo, ande até o fim da floresta, à direita (por onde você entrou), e segure →. Dá para cumprimentar, dançar e subir nas costas de amigos lá também.',
   ],
   dash: [
@@ -2956,5 +2976,74 @@ function updateSlimes() {
     sl.c.scaleX = (hopping ? 0.88 : 1 + Math.sin(now / 220) * 0.04) * (sl.dir || 1) * m * pop;
     sl.c.scaleY = (hopping ? 1.14 : 1 - Math.sin(now / 220) * 0.04) * m * pop;
     if (sl.flash > 0) { sl.flash--; sl.c.setAlpha(sl.flash % 2 ? 0.45 : 1); } else sl.c.setAlpha(1);
+  }
+}
+
+// ======================= Moedas dos slimes =======================
+// Ao derrotar um slime, ele solta moedas (o servidor decide quantas e quem pega primeiro: CoinsDropped / CoinTaken / CoinState).
+// Ficam no chão por 45 s; quem encostar leva. O total fica na conta Google (ou só nesta sessão, sem conta).
+const coins = {}; // id -> { c (contêiner), x, v, born }
+let sessionCoins = 0; // moedas pegas nesta sessão (somadas ao total salvo da conta, que vem em AccountData)
+
+function makeCoinSprite(scene, value) {
+  const r = 6 + Math.min(5, Math.floor(value / 4)); // moeda maior vale mais
+  const g = scene.add.graphics();
+  g.fillStyle(0x000000, 0.25).fillEllipse(0, r + 2, r * 1.6, 4);
+  g.fillStyle(0x8a5a00, 1).fillCircle(0, 0, r);
+  g.fillStyle(value >= 4 ? 0xffe066 : 0xf5c431, 1).fillCircle(0, 0, r - 1.5);
+  g.lineStyle(1.5, 0xb98200, 1).strokeCircle(0, 0, r - 4);
+  g.fillStyle(0xfff6c4, 0.9).fillCircle(-r * 0.35, -r * 0.35, r * 0.28);
+  return scene.add.container(0, 0, [g]).setDepth(0.6);
+}
+
+function addCoin(c, fromX) {
+  if (!gameScene || coins[c.id]) return;
+  const sprite = makeCoinSprite(gameScene, c.v);
+  const restY = GROUND_TOP - 12;
+  if (fromX !== undefined) { // acabou de cair: sobe do slime e quica no chão
+    sprite.setPosition(fromX, restY - 40).setScale(0.4);
+    gameScene.tweens.add({ targets: sprite, x: c.x, scale: 1, duration: 220, ease: 'Quad.Out' });
+    gameScene.tweens.add({ targets: sprite, y: { from: restY - 60, to: restY }, duration: 420, ease: 'Bounce.Out' });
+  } else sprite.setPosition(c.x, restY);
+  sprite.setVisible(currentMap === 'forest');
+  coins[c.id] = { c: sprite, x: c.x, v: c.v, born: Date.now() };
+}
+
+function syncCoins(list) { // lista completa (ao entrar na floresta)
+  for (const id in coins) { coins[id].c.destroy(); delete coins[id]; }
+  for (const c of list) addCoin(c);
+}
+function dropCoinsFx(list) { for (const c of list) addCoin(c, c.from); }
+
+function coinTaken(id, pid, value) {
+  const coin = coins[id];
+  if (!coin) return;
+  if (pid) { // alguém pegou: brilho e (se foi você) som, número e contagem
+    const x = coin.c.x, y = coin.c.y;
+    for (let i = 0; i < 6; i++) {
+      const s = gameScene.add.circle(x, y, 2 + Math.random() * 2, i % 2 ? 0xfff6c4 : 0xf5c431).setDepth(8);
+      const a = Math.random() * Math.PI * 2;
+      gameScene.tweens.add({ targets: s, x: x + Math.cos(a) * 22, y: y + Math.sin(a) * 22 - 10, alpha: 0, duration: 380, onComplete: () => s.destroy() });
+    }
+    if (pid === myId()) {
+      sessionCoins += value;
+      chip([1568, 2093], 0.045, 'square', 0.08);
+      const t = gameScene.add.text(x, y - 18, '+' + value + ' 🪙', { fontSize: '16px', fontStyle: 'bold', color: '#ffe066', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5).setDepth(9);
+      gameScene.tweens.add({ targets: t, y: t.y - 30, alpha: 0, duration: 800, ease: 'Quad.Out', onComplete: () => t.destroy() });
+    }
+  }
+  coin.c.destroy();
+  delete coins[id];
+}
+
+function updateCoins() {
+  const forest = currentMap === 'forest', now = Date.now();
+  for (const k in coins) {
+    const coin = coins[k];
+    coin.c.setVisible(forest);
+    if (!forest) continue;
+    const age = now - coin.born;
+    coin.c.scaleX = Math.abs(Math.cos(now / 260 + coin.x)) * 0.7 + 0.3; // gira
+    if (age > 38000) coin.c.setAlpha(Math.floor(now / 160) % 2 ? 0.35 : 1); // pisca perto de sumir
   }
 }

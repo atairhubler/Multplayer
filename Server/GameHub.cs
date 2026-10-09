@@ -86,6 +86,7 @@ public class GameHub(IHubContext<GameHub> hubContext, Db db, Sessions sessions) 
         catch (Exception) { return new { ok = false, reason = "banco indisponível" }; }
         if (account is null) return new { ok = false, reason = "conta não encontrada" };
         me.AccountId = account.Id;
+        if (DollConfig.IsMatch(me.CharacterSprite)) Progress.SaveCharacter(me.Id, me.CharacterSprite); // guarda a aparência escolhida (bonecos; imagens e GIFs não)
         try
         {
             // devolve o que já foi conquistado nesta conta (títulos, estatísticas, cor do nome...)
@@ -95,7 +96,7 @@ public class GameHub(IHubContext<GameHub> hubContext, Db db, Sessions sessions) 
             {
                 name = account.Name,
                 picture = account.Picture,
-                stats = new { points = data.Stats.Points + pend.Points, playerKills = data.Stats.PlayerKills + pend.PlayerKills, slimeKills = data.Stats.SlimeKills + pend.SlimeKills, deaths = data.Stats.Deaths + pend.Deaths },
+                stats = new { points = data.Stats.Points + pend.Points, playerKills = data.Stats.PlayerKills + pend.PlayerKills, slimeKills = data.Stats.SlimeKills + pend.SlimeKills, deaths = data.Stats.Deaths + pend.Deaths, coins = data.Stats.Coins + pend.Coins },
                 titles = data.Titles,
                 nameColor = data.NameColor,
                 title = data.EquippedTitle,
@@ -128,7 +129,7 @@ public class GameHub(IHubContext<GameHub> hubContext, Db db, Sessions sessions) 
         {
             var data = await db.LoadAccountDataAsync(id);
             var pend = Progress.PendingFor(id);
-            return new { ok = true, points = data.Stats.Points + pend.Points, playerKills = data.Stats.PlayerKills + pend.PlayerKills, slimeKills = data.Stats.SlimeKills + pend.SlimeKills, deaths = data.Stats.Deaths + pend.Deaths, titles = data.Titles };
+            return new { ok = true, points = data.Stats.Points + pend.Points, playerKills = data.Stats.PlayerKills + pend.PlayerKills, slimeKills = data.Stats.SlimeKills + pend.SlimeKills, deaths = data.Stats.Deaths + pend.Deaths, coins = data.Stats.Coins + pend.Coins, titles = data.Titles };
         }
         catch (Exception) { return new { ok = false, reason = "Não consegui ler o perfil agora." }; }
     }

@@ -8,8 +8,8 @@ using Google.Apis.Auth;
 
 public record GoogleLoginRequest(string? Credential);
 public record Account(long Id, string Name, string? Picture);
-public record AccountStats(long Points, int PlayerKills, int SlimeKills, int Deaths);
-public record AccountData(AccountStats Stats, List<string> Titles, string? NameColor, string? EquippedTitle);
+public record AccountStats(long Points, int PlayerKills, int SlimeKills, int Deaths, long Coins);
+public record AccountData(AccountStats Stats, List<string> Titles, string? NameColor, string? EquippedTitle, string? Character);
 public record RankingRow(long AccountId, string Name, long Points, int SlimeKills, int PlayerKills);
 
 public sealed class Sessions
@@ -74,7 +74,13 @@ public static class GoogleAuth
             {
                 var name = string.IsNullOrWhiteSpace(payload.GivenName) ? (payload.Name ?? "Jogador") : payload.GivenName;
                 var account = await db.UpsertAccountAsync(payload.Subject, payload.Email, name.Trim(), payload.Picture);
-                return Results.Ok(new { token = sessions.Create(account.Id, TimeSpan.FromDays(30)), account = new { name = account.Name, picture = account.Picture } });
+                // aparência e cor do nome salvas: o cliente preenche a tela de entrada com elas (o mesmo personagem em qualquer aparelho)
+                var saved = await db.LoadAccountDataAsync(account.Id);
+                return Results.Ok(new
+                {
+                    token = sessions.Create(account.Id, TimeSpan.FromDays(30)),
+                    account = new { name = account.Name, picture = account.Picture, character = saved.Character, nameColor = saved.NameColor },
+                });
             }
             catch (Exception)
             {

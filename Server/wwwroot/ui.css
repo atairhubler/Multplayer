@@ -131,3 +131,7 @@
   .rankRow { grid-template-columns: 30px 1fr 60px 50px 60px; font-size: 12px; padding: 6px 8px; }
   .mapCards { grid-template-columns: 1fr; } .mapCard { min-height: 90px; }
 }
+
+/* moedas ao lado dos pontos na barra do topo */
+#coinsChip { display: flex; align-items: center; gap: 5px; background: #0009; border: 1px solid #ffffff30; border-radius: 16px; padding: 4px 12px; color: #ffe066; font-weight: 700; font-size: 16px; text-shadow: 1px 1px 2px #000; }
+@media (max-height: 430px), (max-width: 760px) { #coinsChip { font-size: 13px; padding: 2px 8px; } }

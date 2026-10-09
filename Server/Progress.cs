@@ -4,7 +4,7 @@ using System.Collections.Concurrent;
 // Os números vão se acumulando na memória (rápido, sem travar o jogo) e são gravados no banco a cada 30 s e quando o jogador sai.
 public static class Progress
 {
-    private sealed class Delta { public long Points; public int PlayerKills, SlimeKills, Deaths; }
+    private sealed class Delta { public long Points, Coins; public int PlayerKills, SlimeKills, Deaths; }
 
     private static readonly ConcurrentDictionary<long, Delta> Pending = new();
     private static Db? _db;
@@ -25,10 +25,11 @@ public static class Progress
     }
 
     // Soma ao progresso da conta ligada a esta conexão (se não houver conta, não faz nada)
-    public static void Add(string connectionId, int points = 0, int playerKills = 0, int slimeKills = 0, int deaths = 0)
+    public static void Add(string connectionId, int points = 0, int playerKills = 0, int slimeKills = 0, int deaths = 0, int coins = 0)
     {
         if (!TryAccount(connectionId, out var id)) return;
         var d = Pending.GetOrAdd(id, _ => new Delta());
+        if (coins != 0) Interlocked.Add(ref d.Coins, coins);
         if (points != 0) Interlocked.Add(ref d.Points, points);
         if (playerKills != 0) Interlocked.Add(ref d.PlayerKills, playerKills);
         if (slimeKills != 0) Interlocked.Add(ref d.SlimeKills, slimeKills);
@@ -37,7 +38,14 @@ public static class Progress
 
     // Ainda não gravado no banco (para mostrar valores atualizados no /perfil)
     public static AccountStats PendingFor(long accountId) =>
-        Pending.TryGetValue(accountId, out var d) ? new AccountStats(Interlocked.Read(ref d.Points), d.PlayerKills, d.SlimeKills, d.Deaths) : new AccountStats(0, 0, 0, 0);
+        Pending.TryGetValue(accountId, out var d) ? new AccountStats(Interlocked.Read(ref d.Points), d.PlayerKills, d.SlimeKills, d.Deaths, Interlocked.Read(ref d.Coins)) : new AccountStats(0, 0, 0, 0, 0);
+
+    // Guarda a aparência (só bonecos "char:") da conta ligada a esta conexão
+    public static void SaveCharacter(string connectionId, string character)
+    {
+        if (!TryAccount(connectionId, out var id)) return;
+        _ = Task.Run(async () => { try { await _db!.SaveCharacterAsync(id, character); } catch (Exception e) { Console.WriteLine("[db] aparência não salva: " + e.GetType().Name); } });
+    }
 
     public static void SaveTitle(string connectionId, string title)
     {
@@ -62,11 +70,12 @@ public static class Progress
             var pk = Interlocked.Exchange(ref d.PlayerKills, 0);
             var sk = Interlocked.Exchange(ref d.SlimeKills, 0);
             var dt = Interlocked.Exchange(ref d.Deaths, 0);
-            if (pts == 0 && pk == 0 && sk == 0 && dt == 0) continue;
-            try { await _db.AddStatsAsync(id, pts, pk, sk, dt); }
+            var coins = Interlocked.Exchange(ref d.Coins, 0);
+            if (pts == 0 && pk == 0 && sk == 0 && dt == 0 && coins == 0) continue;
+            try { await _db.AddStatsAsync(id, pts, pk, sk, dt, coins); }
             catch (Exception e)
             {
-                Interlocked.Add(ref d.Points, pts); Interlocked.Add(ref d.PlayerKills, pk); Interlocked.Add(ref d.SlimeKills, sk); Interlocked.Add(ref d.Deaths, dt);
+                Interlocked.Add(ref d.Points, pts); Interlocked.Add(ref d.PlayerKills, pk); Interlocked.Add(ref d.SlimeKills, sk); Interlocked.Add(ref d.Deaths, dt); Interlocked.Add(ref d.Coins, coins);
                 Console.WriteLine("[db] progresso não gravado (tentarei de novo): " + e.GetType().Name);
             }
         }

@@ -49,8 +49,10 @@ const ui = {
   xpFill: document.getElementById('hudXpFill'), xpText: document.getElementById('hudXpText'),
   manaFill: document.getElementById('hudManaFill'), manaText: document.getElementById('hudManaText'),
   staminaFill: document.getElementById('hudStaminaFill'), staminaText: document.getElementById('hudStaminaText'),
-  pointsValue: document.getElementById('pointsValue'),
+  pointsValue: document.getElementById('pointsValue'), coinsValue: document.getElementById('coinsValue'),
 };
+// moedas: o total salvo na conta (vem em AccountData) + as pegas nesta sessão (contadas em coinTaken, no game.js)
+const totalCoins = () => (accountInfo?.stats?.coins || 0) + sessionCoins;
 
 async function drawPortrait(canvas, character, crop = true) {
   const ctx = canvas.getContext('2d');
@@ -71,10 +73,10 @@ async function drawPortrait(canvas, character, crop = true) {
 
 // ---------- Mana ----------
 // Mana (barra azul): cada golpe gasta um pouco, conforme a arma, e ela recarrega sozinha (12 por segundo).
-// Stamina (barra verde): o dash gasta 30 e ela recarrega (22 por segundo): dá para fazer uns 3 dashes seguidos e depois esperar.
+// Stamina (barra verde): o dash gasta 30 e ela recarrega devagar (7,3 por segundo, ~14 s para encher): uns 3 dashes seguidos e depois é esperar.
 // As duas ficam só no seu navegador (o servidor não cobra), então servem para dar ritmo ao jogo; é fácil ajustar os valores abaixo.
 const MANA_MAX = 100, MANA_REGEN_PER_S = 12, MANA_COST_WEAPON = [4, 6, 8, 12, 2]; // espada, lança, arco, martelo, garras
-const STAMINA_MAX = 100, STAMINA_REGEN_PER_S = 22, STAMINA_COST_DASH = 30;
+const STAMINA_MAX = 100, STAMINA_REGEN_PER_S = 7.3, STAMINA_COST_DASH = 30;
 let manaValue = MANA_MAX, manaAt = Date.now(), staminaValue = STAMINA_MAX, staminaAt = Date.now();
 function manaNow() {
   const now = Date.now();
@@ -112,7 +114,8 @@ function updateHud() {
   const me = arenaById[myId()];
   const hp = isCombat() && me ? me.hp : 100;
   const mana = Math.floor(manaNow()), stamina = Math.floor(staminaNow());
-  const key = [hp, pts, lv.level, mana, stamina].join('|');
+  const coinsNow = totalCoins();
+  const key = [hp, pts, lv.level, mana, stamina, coinsNow].join('|');
   if (key === hudKey) return;
   hudKey = key;
   ui.level.textContent = lv.level;
@@ -120,8 +123,8 @@ function updateHud() {
   ui.manaFill.style.width = mana + '%'; ui.manaText.textContent = `${mana} / ${MANA_MAX}`;
   ui.staminaFill.style.width = stamina + '%'; ui.staminaText.textContent = `${stamina} / ${STAMINA_MAX}`;
   ui.xpFill.style.width = lv.pct * 100 + '%'; ui.xpText.textContent = `XP ${pts} / ${lv.to}`;
-  ui.pointsValue.textContent = pts;
-  const sp = document.getElementById('screenPoints'); if (sp) sp.textContent = `⭐ ${pts}`;
+  ui.pointsValue.textContent = pts; ui.coinsValue.textContent = coinsNow;
+  const sp = document.getElementById('screenPoints'); if (sp) sp.textContent = `🪙 ${coinsNow}   ⭐ ${pts}`;
 }
 
 // posiciona o HUD e o resto relativos ao canvas do jogo (mesma ideia do positionChat)
@@ -232,14 +235,14 @@ function showProfile() {
   };
   const addStat = (label, v) => { const r = uiEl('div'); r.append(uiEl('span', label), uiEl('b', String(v))); stats.append(r); };
   if (!sessionToken) {
-    addStat('🟢 Slimes derrotados', '—'); addStat('⚔️ Jogadores derrotados', '—'); addStat('💀 Derrotas', '—');
+    addStat('🪙 Moedas (só nesta sessão)', sessionCoins); addStat('🟢 Slimes derrotados', '—'); addStat('⚔️ Jogadores derrotados', '—'); addStat('💀 Derrotas', '—');
     fillTitles(getTitles());
     note.textContent = 'Você está jogando sem conta: nada é salvo. Entre com o Google na tela inicial para guardar pontos, títulos e a cor do nome, e aparecer na Classificação.';
     return;
   }
   connection.invoke('GetMyStats').then(r => {
     if (!r?.ok) { note.textContent = r?.reason || 'Não consegui ler o perfil agora.'; fillTitles(getTitles()); return; }
-    addStat('🟢 Slimes derrotados', r.slimeKills); addStat('⚔️ Jogadores derrotados', r.playerKills); addStat('💀 Derrotas', r.deaths);
+    addStat('🪙 Moedas', r.coins ?? totalCoins()); addStat('🟢 Slimes derrotados', r.slimeKills); addStat('⚔️ Jogadores derrotados', r.playerKills); addStat('💀 Derrotas', r.deaths);
     fillTitles([...new Set([...getTitles(), ...r.titles])]);
     note.textContent = 'Seu progresso é salvo automaticamente nesta conta.';
   }).catch(() => { note.textContent = 'O servidor ainda não tem o perfil (ele pode estar atualizando).'; fillTitles(getTitles()); });
