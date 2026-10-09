@@ -639,9 +639,10 @@ function setupChat() {
   renderOnline();
   connection.on('ChatHistory', list => list.forEach(m => addChatLine(m.name, m.text)));
   connection.on('ChatMessage', m => {
+    // primeiro o som: nada pode impedi-lo. Mensagem de amigo = "ding-dong"; a sua própria = um "blip" curto de envio
+    try { if (m.id !== myId()) playPing(); else playSend(); } catch (e) { console.warn('[som] aviso do chat falhou', e); }
     addChatLine(m.name, m.text);
     showBubble(m.id, m.text);
-    if (m.id !== myId()) playPing();
   });
   setupVoiceEvents();
   setupShareEvents();
@@ -1218,17 +1219,40 @@ function playChime() {
 
 // Plim discreto quando chega mensagem de um amigo no chat
 let lastPing = 0;
+// Reserva: o mesmo "ding-dong" como arquivo WAV gerado na hora e tocado por um <audio> comum. Serve quando o WebAudio
+// está suspenso/bloqueado (alguns navegadores e celulares) mas o navegador já aceita tocar áudio depois do primeiro toque.
+let pingWavUrl = null;
+function pingWav() {
+  if (pingWavUrl) return pingWavUrl;
+  const rate = 22050, n = Math.floor(rate * 0.6), buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+  const w = (o, t) => [...t].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+  w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) {
+    const t = i / rate, second = t >= 0.12, tt = second ? t - 0.12 : t, f = second ? 1760 : 1318.5;
+    const env = Math.min(1, tt / 0.01) * Math.exp(-tt * 7);
+    v.setInt16(44 + i * 2, Math.round(Math.sin(2 * Math.PI * f * tt) * env * 0.8 * 32767), true);
+  }
+  return (pingWavUrl = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' })));
+}
+
+function playSend() {
+  if (music.sfxMuted) return;
+  unlockAudio();
+  chip([1046.5, 1568], 0.045, 'square', 0.09); // dois "blips" 16 bits, mais discretos que o aviso de amigo
+}
+
 function playPing() {
+  if (music.sfxMuted) return;
   unlockAudio(); // cria/retoma o áudio se o navegador o tiver suspendido
-  if (!music.ctx || !music.sfx || music.sfxMuted) return;
   const now = Date.now();
   if (now - lastPing < 150) return; // várias mensagens juntas não viram uma rajada de sons
   lastPing = now;
-  const play = () => {
+  if (music.ctx && music.sfx && music.ctx.state === 'running') {
     const t0 = music.ctx.currentTime;
-    // "ding-dong" de duas notas, mais forte que o aviso de entrada para dar para ouvir mesmo com a música tocando
+    // "ding-dong" de duas notas, bem audível mesmo com a música tocando (ganho acima do aviso de entrada)
     [[1318.5, 0], [1760, 0.12]].forEach(([freq, delay]) => {
-      for (const [type, mult, gain] of [['sine', 1, 0.5], ['triangle', 2, 0.12]]) {
+      for (const [type, mult, gain] of [['sine', 1, 0.9], ['triangle', 2, 0.2]]) {
         const osc = music.ctx.createOscillator(), g = music.ctx.createGain();
         osc.type = type; osc.frequency.value = freq * mult;
         g.gain.setValueAtTime(0.0001, t0 + delay);
@@ -1238,9 +1262,14 @@ function playPing() {
         osc.start(t0 + delay); osc.stop(t0 + delay + 0.5);
       }
     });
-  };
-  if (music.ctx.state === 'running') play();
-  else music.ctx.resume().then(play).catch(() => {}); // sem gesto do usuário o navegador pode recusar: então fica mudo
+    return;
+  }
+  // WebAudio parado: tenta o <audio> comum (e tenta acordar o WebAudio para as próximas vezes)
+  console.info('[som] WebAudio não está ativo (' + (music.ctx ? music.ctx.state : 'sem contexto') + '); usando o aviso alternativo');
+  music.ctx?.resume().catch(() => {});
+  const a = new Audio(pingWav());
+  a.volume = 0.7;
+  a.play().catch(err => console.info('[som] o navegador bloqueou o aviso sonoro; clique na página uma vez', err?.name));
 }
 
 // ---- Comandos do chat: /comandos e a ajuda de cada um ----
