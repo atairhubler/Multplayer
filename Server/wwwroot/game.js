@@ -720,7 +720,7 @@ const MOODS = {
   15: { bar: 9, chords: [[65, 69, 72], [60, 64, 67], [62, 65, 69], [58, 62, 65]] },  // tarde: quente, Fá maior
   18: { bar: 10, chords: [[57, 60, 64], [53, 57, 60], [60, 64, 67], [55, 59, 62]] }, // noite: calmo, Lá menor
 };
-const MUSIC_VOLUME = 0.25; // volume geral da música (0 a 1)
+const MUSIC_VOLUME = 0.125; // volume geral da música (0 a 1)
 const midiFreq = n => 440 * Math.pow(2, (n - 69) / 12);
 
 function unlockAudio() {
