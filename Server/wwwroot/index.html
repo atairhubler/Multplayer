@@ -130,8 +130,9 @@
       background: rgba(0, 0, 0, .55); padding: 8px; border-radius: 12px; }
     #emoteTray.open { display: flex; }
     #emoteTray button { width: 48px; height: 48px; font-size: 26px; border-radius: 50%; padding: 0; }
-    .grp.mid { align-items: flex-end; }
-    #talkBtn, #emoteBtn, #attackBtn { width: 56px !important; height: 56px !important; font-size: 24px !important; align-self: flex-end; }
+    #talkBtn, #emoteBtn { width: 56px !important; height: 56px !important; font-size: 24px !important; }
+    /* celular: balão de chat e emotes ficam na lateral esquerda, acima das setas; o botão de atacar fica ao lado do de pular (mesmo tamanho) */
+    #touch .grp.mid { position: fixed; left: 16px; bottom: 112px; flex-direction: column; gap: 12px; }
     /* Aviso para girar o celular (modo paisagem obrigatório) */
     #rotate { display: none; position: fixed; inset: 0; z-index: 50; background: #111; color: #fff; flex-direction: column;
       align-items: center; justify-content: center; gap: 14px; text-align: center; font-size: 18px; padding: 24px; }
@@ -207,8 +208,8 @@
   <div id="rotate"><div style="font-size:64px">📱</div><div>Gire o celular para o modo paisagem para jogar</div></div>
   <div id="touch">
     <div class="grp"><button data-key="left">◀</button><button data-key="right">▶</button></div>
-    <div class="grp mid"><button id="attackBtn" title="Atacar">🗡️</button><button id="talkBtn" title="Falar">💬</button><button id="emoteBtn" title="Emotes">😀</button></div>
-    <div class="grp"><button data-key="jump">▲</button></div>
+    <div class="grp mid"><button id="talkBtn" title="Falar">💬</button><button id="emoteBtn" title="Emotes">😀</button></div>
+    <div class="grp"><button id="attackBtn" title="Atacar">🗡️</button><button data-key="jump">▲</button></div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>

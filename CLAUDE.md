@@ -31,7 +31,7 @@ Server/
     index.html      Login (nome, gênero, cores, upload de imagem), chat, painel de online, HUD, bandeja de emotes, projeções
     game.js         TODO o cliente (Phaser 3 + SignalR + WebRTC). ~1.5k linhas, seções comentadas (veja abaixo)
     assets/         peças do boneco (+ dolls.json), fundos (fundo_10h/15h/18h.jpg), projecao.png/json
-tools/              build-doll-assets.js, build-projection-asset.js e build-arena-assets.js (fundo da arena, placa, balão) (geram os assets a partir de /Personagens; precisam de `npm i pngjs`)
+tools/              (a arte do homem é `Personagens/Homem/homem png partido 2.png`, a da mulher `Mulher/Mulher png partida.png`) build-doll-assets.js, build-projection-asset.js e build-arena-assets.js (fundo da arena, placa, balão) (geram os assets a partir de /Personagens; precisam de `npm i pngjs`)
 Personagens/        arte-fonte enviada pelo dono (Homem/, Mulher/, background/, Compartilhar/). Não é usada em runtime.
 ```
 
@@ -107,3 +107,9 @@ IDs de emote: 0–5 teclado; 6🖐️ 7🤝 8💢 9🎵; 20–26 pontos do vilar
 - **Limites no servidor:** `Allow()` (ações sociais) é compartilhado; o dash e a troca de mapa têm limites próprios (`LastDashAt`, `LastMapAt`). Nunca faça uma ação frequente (dash) consumir o limite de uma ação crítica (sair da arena).
 - A saída/entrada da arena vale numa faixa de 56 px junto da borda (`MAP_EDGE_ZONE`) e também com um dash contra a borda.
 - `safe()` envolve as rotinas secundárias do quadro (`update`) para um erro nelas não parar o movimento.
+
+## Arte do boneco
+- Homem: arte pixel art nova (`homem png partido 2.png`; `homem png 2.png` é só a referência para casar escala/posição, constantes em `GENDERS.m` de `tools/build-doll-assets.js`, que agora tem `figTop/figBot` por personagem). Mulher: arte antiga.
+- A recoloração (`recoloredPart` no `game.js`) tem regras só para o homem: pele = matiz ≥ 24° e saturação ≥ 0,7 (o couro marrom de cinto/bolsa não vira pele), roupa aceita verdes mais apagados (saturação ≥ 0,22), cabelo escuro (luminosidade < 0,2) fica como contorno.
+- **Ao trocar as imagens do boneco, aumente `DOLL_ART_VERSION` no `game.js`** (os arquivos `assets/m_*.png` mantêm o nome e o navegador guardaria a arte antiga).
+- Celular: 💬 e 😀 ficam em coluna na lateral esquerda (acima das setas); 🗡️ (só na arena/floresta) fica ao lado do ▲, no mesmo tamanho.

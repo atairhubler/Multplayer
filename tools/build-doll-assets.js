@@ -14,12 +14,14 @@ const FIG_TOP = 32, FIG_BOT = 341; // altura do personagem inteiro nas imagens o
 // Caixas (x0,y0,x1,y1) de cada peça na folha, e onde/qual escala ela fica no personagem inteiro
 // (resultado do casamento de imagens feito sobre os arquivos fornecidos).
 const GENDERS = {
-  m: { dir: 'Homem', sheet: 'Homem png partido.png',
-    head: { box: [45, 91, 174, 247], at: [277, 32], s: 0.95 },
-    torso: { box: [232, 105, 328, 264], at: [301, 155], s: 0.75 },
-    arm: { box: [412, 125, 456, 252], at: [296, 166], s: 0.85 },
-    leg: { box: [544, 122, 604, 267], at: [305, 219], s: 0.85 } },
-  f: { dir: 'Mulher', sheet: 'Mulher png partida.png',
+  // Homem (arte nova "homem png partido 2.png"): caixas apertadas em cada peça da folha; "at" = onde a caixa cai na
+  // imagem do personagem inteiro ("homem png 2.png", 174x351, figura em y 16..335) e "s" = escala (casamento de imagens)
+  m: { dir: 'Homem', sheet: 'homem png partido 2.png', figTop: 16, figBot: 335,
+    head: { box: [40, 96, 169, 248], at: [7.5, 16], s: 0.96 },
+    torso: { box: [221, 110, 334, 259], at: [28, 143], s: 0.76 },
+    arm: { box: [414, 121, 461, 253], at: [23, 155], s: 0.81 },
+    leg: { box: [546, 118, 611, 267], at: [54, 242], s: 0.62 } },
+  f: { dir: 'Mulher', sheet: 'Mulher png partida.png', figTop: FIG_TOP, figBot: FIG_BOT,
     head: { box: [46, 46, 211, 236], at: [236, 32], s: 1.0 },
     torso: { box: [279, 111, 353, 256], at: [318, 151], s: 0.7 },
     arm: { box: [427, 124, 477, 247], at: [297, 165], s: 0.9 },
@@ -70,11 +72,11 @@ function cropScaled(p, [x0, y0, x1, y1], f) {
 
 fs.mkdirSync(OUT, { recursive: true });
 const layout = {};
-const k = TARGET_H / (FIG_BOT - FIG_TOP);
-const cy = (FIG_TOP + FIG_BOT) / 2;
 
 for (const [g, G] of Object.entries(GENDERS)) {
   const sheet = read(path.join(SRC, G.dir, G.sheet));
+  const k = TARGET_H / (G.figBot - G.figTop); // cada personagem tem a própria altura na imagem inteira
+  const cy = (G.figTop + G.figBot) / 2;
   const cx = G.torso.at[0] + (G.torso.box[2] - G.torso.box[0] + 1) * G.torso.s / 2; // centro do corpo
   const parts = [];
 

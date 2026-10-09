@@ -729,15 +729,16 @@ document.getElementById('talkBtn').addEventListener('click', () => { if (chatRea
 // Cada pixel dessas zonas troca de matiz/cor pela escolha do usuário, mantendo o sombreado.
 // Posições/pivôs das peças vêm de assets/dolls.json (gerado por tools/build-doll-assets.js).
 const ASSET_DIR = 'assets/';
+const DOLL_ART_VERSION = 2; // aumente quando as imagens do boneco mudarem (senão o navegador usa a arte antiga do cache)
 let dollLayout = null;
 const dollImages = {};
 const dollAssetsReady = (async () => {
-  dollLayout = await (await fetch(ASSET_DIR + 'dolls.json')).json();
+  dollLayout = await (await fetch(ASSET_DIR + 'dolls.json?v=' + DOLL_ART_VERSION)).json();
   await Promise.all(Object.values(dollLayout).flat().map(p => new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => { dollImages[p.file] = img; resolve(); };
     img.onerror = reject;
-    img.src = ASSET_DIR + p.file;
+    img.src = ASSET_DIR + p.file + '?v=' + DOLL_ART_VERSION;
   })));
 })();
 
@@ -785,11 +786,17 @@ function recoloredPart(file, cfg) {
   for (let i = 0; i < px.length; i += 4) {
     if (px[i + 3] === 0) continue;
     const [h, sat, l] = rgbToHsl(px[i], px[i + 1], px[i + 2]);
-    if (sat < 0.4 || l < 0.1) continue; // contorno, cinza (sapatos), branco dos olhos: não mexe
     const zone = ZONES.find(z => h >= z.from && h <= z.to);
     if (!zone) continue;
+    // O homem usa arte nova (pixel art) com mais cores: couro marrom (cinto/bolsa), cota de malha cinza, botas e contorno azul-marinho
+    const male = !cfg.female;
+    const minSat = male && zone.key === 'cloth' ? 0.22 : 0.4; // verdes mais apagados da roupa também mudam
+    if (sat < minSat || l < 0.1) continue; // contorno, cinza (sapatos, malha), branco dos olhos: não mexe
+    if (male && zone.key === 'skin' && (h < 24 || sat < 0.7)) continue; // o marrom do couro não é pele
+    if (male && zone.key === 'hair' && l < 0.2) continue; // o contorno escuro continua escuro
     const [th, ts, tl] = target[zone.key];
-    const nl = Math.max(0.04, Math.min(0.96, tl + (l - zone.base)));
+    const base = male && zone.key === 'hair' ? 0.38 : zone.base;
+    const nl = Math.max(0.04, Math.min(0.96, tl + (l - base)));
     const [r, g, b] = hslToRgb(th, ts, nl);
     px[i] = r; px[i + 1] = g; px[i + 2] = b;
   }
