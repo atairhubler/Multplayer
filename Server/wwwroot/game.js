@@ -40,6 +40,7 @@ function startPhaser() {
     height: 600,
     backgroundColor: '#87ceeb',
     physics: { default: 'arcade', arcade: { gravity: { y: 800 }, debug: false } },
+    scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
     scene: { create, update }
   });
 }
@@ -107,11 +108,11 @@ function create() {
 
 function update(time) {
   const body = player.body;
-  if (cursors.left.isDown) body.setVelocityX(-200);
-  else if (cursors.right.isDown) body.setVelocityX(200);
+  if (cursors.left.isDown || touch.left) body.setVelocityX(-200);
+  else if (cursors.right.isDown || touch.right) body.setVelocityX(200);
   else body.setVelocityX(0);
 
-  if (cursors.up.isDown && body.blocked.down) body.setVelocityY(-500);
+  if ((cursors.up.isDown || touch.jump) && body.blocked.down) body.setVelocityY(-500);
 
   nameLabel.setPosition(player.x, player.y - 38);
 
@@ -129,4 +130,17 @@ function update(time) {
     r.rect.y = Phaser.Math.Linear(r.rect.y, r.targetY, 0.25);
     r.label.setPosition(r.rect.x, r.rect.y - 38);
   }
+}
+
+// ---- Controles de toque (celular) ----
+const touch = { left: false, right: false, jump: false };
+document.querySelectorAll('#touch button').forEach(btn => {
+  const key = btn.dataset.key;
+  const set = v => e => { e.preventDefault(); touch[key] = v; };
+  btn.addEventListener('pointerdown', set(true));
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => btn.addEventListener(ev, set(false)));
+  btn.addEventListener('contextmenu', e => e.preventDefault());
+});
+if (matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window) {
+  document.getElementById('touch').style.display = 'flex';
 }
