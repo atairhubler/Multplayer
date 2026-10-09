@@ -18,7 +18,7 @@ public class GameHub(IHubContext<GameHub> hubContext, Db db, Sessions sessions) 
     private static readonly ConcurrentDictionary<string, long> LastEmoteAt = new();
     private static readonly ConcurrentDictionary<string, long> LastActionAt = new();
     // Limites próprios do dash e da troca de mapa: não podem disputar o limite das ações sociais (o dash bloqueava a saída da arena)
-    private static readonly ConcurrentDictionary<string, long> LastDashAt = new(), LastMapAt = new();
+    private static readonly ConcurrentDictionary<string, long> LastDashAt = new(), LastMapAt = new(), LastHomeAt = new();
 
     // Títulos que podem ser exibidos ao lado do nome
     internal static readonly string[] AllowedTitles = { "Campeão do Pique-Pega", "Cumprimentador", "Dançarino" };
@@ -407,6 +407,25 @@ public class GameHub(IHubContext<GameHub> hubContext, Db db, Sessions sessions) 
         if (toCombat) await Clients.Caller.SendAsync("ArenaState", ArenaGame.Snapshot());
     }
 
+    // Menu → Cidade: volta ao vilarejo de qualquer mapa (com espera, para não virar fuga fácil de combate)
+    public async Task<object> GoHome()
+    {
+        if (!Players.TryGetValue(Context.ConnectionId, out var me)) return new { ok = false };
+        if (me.Map == "village") return new { ok = false, reason = "Você já está na cidade." };
+        var nowMs = Environment.TickCount64;
+        if (LastHomeAt.TryGetValue(me.Id, out var lastHome) && nowMs - lastHome < 10_000) return new { ok = false, reason = "Espere alguns segundos para usar a Cidade de novo." };
+        if (me.RidingOn is not null) return new { ok = false, reason = "Desça das costas do amigo antes de voltar à cidade." };
+        LastHomeAt[me.Id] = nowMs;
+        foreach (var rider in Players.Values.Where(p => p.RidingOn == me.Id).ToList()) await Dismount(rider);
+        if (me.Dancing) { me.Dancing = false; await StopDanceAccounting(me.Id); await Clients.Group(Room).SendAsync("PlayerDance", me.Id, false); }
+        me.Map = "village";
+        me.X = ArenaGame.VillageHomeX;
+        me.Y = ArenaGame.SpawnY;
+        await ArenaGame.Leave(hubContext, me.Id);
+        await Clients.Group(Room).SendAsync("PlayerMap", me.Id, me.Map, me.X, me.Y);
+        return new { ok = true };
+    }
+
     public Task SetWeapon(int weapon) =>
         Players.ContainsKey(Context.ConnectionId) ? ArenaGame.SetWeapon(hubContext, Context.ConnectionId, weapon) : Task.CompletedTask;
 
@@ -503,6 +522,7 @@ public class GameHub(IHubContext<GameHub> hubContext, Db db, Sessions sessions) 
         LastActionAt.TryRemove(id, out _);
         LastDashAt.TryRemove(id, out _);
         LastMapAt.TryRemove(id, out _);
+        LastHomeAt.TryRemove(id, out _);
         GreetPending.TryRemove(id, out _);
         GreetCount.TryRemove(id, out _);
         DanceStartedAt.TryRemove(id, out _);

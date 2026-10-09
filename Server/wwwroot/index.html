@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <title>Plataforma Multiplayer PoC</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alegreya+SC:wght@400;500;700&display=swap">
+  <link rel="stylesheet" href="ui.css">
   <style>
     html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; background: #111; font-family: sans-serif; color: #fff; }
     #login {
@@ -56,33 +59,6 @@
     #fsBtnDesk { position: fixed; right: 56px; bottom: 12px; z-index: 6; width: 36px; height: 36px; padding: 0; border-radius: 50%;
       border: 2px solid #fff9; background: rgba(0, 0, 0, .55); color: #fff; font-size: 18px; cursor: pointer; }
     #fsBtnDesk[hidden] { display: none; }
-    #infoModal { position: fixed; inset: 0; z-index: 46; background: rgba(0, 0, 0, .6); display: flex; align-items: center; justify-content: center; }
-    #infoModal[hidden] { display: none; }
-    #infoPanel { width: min(560px, 94vw); max-height: 84vh; overflow-y: auto; background: #1b2238; border: 1px solid #fff5; border-radius: 12px;
-      padding: 14px 16px; box-shadow: 0 0 30px #000a; }
-    #infoPanel h3 { margin: 0 0 10px; display: flex; justify-content: space-between; align-items: center; font-size: 18px; }
-    #infoClose { width: auto; padding: 2px 10px; background: none; border: none; color: #fff; font-size: 18px; cursor: pointer; }
-    #infoBody { font-size: 14px; line-height: 1.4; }
-    #infoBody .note { color: #aab7c9; font-size: 13px; margin: 8px 0 0; }
-    #rankTable { width: 100%; border-collapse: collapse; }
-    #rankTable th { text-align: left; color: #ffd966; font-size: 12px; padding: 4px 6px; border-bottom: 1px solid #fff3; }
-    #rankTable td { padding: 6px; border-bottom: 1px solid #fff1; }
-    #rankTable td.num, #rankTable th.num { text-align: right; }
-    #rankTable tr.me td { background: rgba(255, 217, 102, .15); color: #ffd966; font-weight: bold; }
-    .profileHead { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
-    .profileHead img { width: 56px; height: 56px; border-radius: 50%; border: 2px solid #fff6; object-fit: cover; }
-    .profileHead .pname { font-size: 20px; font-weight: bold; }
-    .statGrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 12px; }
-    .statGrid div { background: #0003; border: 1px solid #fff2; border-radius: 8px; padding: 8px 10px; }
-    .statGrid b { display: block; font-size: 20px; color: #ffd966; }
-    .badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-    .badge { background: #3a2f5e; border: 1px solid #8a78c8; border-radius: 12px; padding: 3px 10px; font-size: 13px; }
-    .badge.on { background: #5e4a1c; border-color: #ffd966; }
-    #menuList { position: absolute; right: 0; top: 100%; margin-top: 4px; min-width: 150px; background: rgba(20, 24, 40, .96); border: 1px solid #fff4;
-      border-radius: 8px; padding: 4px; display: flex; flex-direction: column; z-index: 8; }
-    #menuList[hidden] { display: none; }
-    #menuList button { text-align: left; padding: 8px 10px !important; font-size: 14px !important; border-radius: 6px; }
-    #menuList button:hover { background: #fff2 !important; }
     #helpModal { position: fixed; inset: 0; z-index: 45; background: rgba(0, 0, 0, .6); display: flex; align-items: center; justify-content: center; }
     #helpModal[hidden] { display: none; }
     #helpPanel { width: min(520px, 92vw); max-height: 82vh; overflow-y: auto; background: #1b2238; border: 1px solid #fff5;
@@ -245,13 +221,23 @@
   <div id="game"></div>
   <div id="sprites"></div>
   <div id="online" hidden>
-    <div id="onlineHead"><button id="onlineToggle" title="Quem está online">👥 <span id="onlineCount">1</span></button><span><button id="menuBtn" title="Menu: ranking e perfil">☰</button><button id="voiceBtn" title="Chat de voz: entrar ou sair">🎧</button><button id="micBtn" title="Mutar ou desmutar o microfone" hidden>🎤</button><button id="muteBtn" title="Música: ligar/desligar">🎵</button><button id="sfxBtn" title="Efeitos sonoros: ligar/desligar">🔊</button></span></div>
-    <div id="menuList" hidden>
-      <button data-menu="ranking">🏆 Ranking</button>
-      <button data-menu="perfil">🧾 Perfil</button>
+    <div id="onlineHead">
+      <span id="pointsChip" title="Pontos de combate">⭐ <b id="pointsValue">0</b></span>
+      <button id="voiceBtn" class="tbBtn" title="Chat de voz: entrar ou sair">🎧</button>
+      <button id="micBtn" class="tbBtn" title="Mutar ou desmutar o microfone" hidden>🎤</button>
+      <button id="onlineToggle" class="tbBtn" title="Quem está online">👥<b id="onlineCount">1</b></button>
+      <button id="menuBtn" class="tbBtn" title="Menu"><span class="ico"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8.5 5.5V5a3.5 3.5 0 0 1 7 0v.5H18l1.5 15.5h-15L6 5.5z"/><rect x="9.5" y="10" width="5" height="3" rx="1" fill="#1b2238"/></svg></span></button>
     </div>
     <ul id="onlineList"></ul>
     <div id="onlineHint">Emotes: teclas 1 a 6</div>
+  </div>
+  <div id="settingsSource" hidden><button id="muteBtn" title="Música: ligar/desligar">🎵</button><button id="sfxBtn" title="Efeitos sonoros: ligar/desligar">🔊</button></div>
+  <div id="playerHud" hidden>
+    <div id="hudPortraitWrap"><div id="hudPortrait"><canvas id="hudFace" width="64" height="64"></canvas></div><div id="hudLevel">1</div></div>
+    <div id="hudBars">
+      <div class="hudBar hp"><i id="hudHpFill"></i><span id="hudHpText">100 / 100</span></div>
+      <div class="hudBar xp"><i id="hudXpFill"></i><span id="hudXpText">0 / 25</span></div>
+    </div>
   </div>
   <div id="emoteTray"></div>
   <div id="hud" hidden></div>
@@ -266,8 +252,14 @@
   <button id="helpBtn" title="Ajuda: como usar os comandos" hidden>?</button>
   <button id="fsBtnDesk" title="Tela cheia" hidden>⛶</button>
   <div id="infoModal" hidden>
-    <div id="infoPanel" role="dialog" aria-label="Janela">
-      <h3><span id="infoTitle"></span><button id="infoClose" title="Fechar">✕</button></h3>
+    <header id="screenHead"><span id="screenIcon"></span><h2 id="infoTitle"></h2><span id="screenPoints">⭐ 0</span><button id="infoClose" title="Fechar">✕</button></header>
+    <div id="screenMain">
+      <nav id="screenSide" hidden>
+        <button id="sideSettings" title="Configurações"><span class="ico"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M10.4 2h3.2l.5 2.6 1.6.7 2.2-1.5 2.3 2.3-1.5 2.2.7 1.6 2.6.5v3.2l-2.6.5-.7 1.6 1.5 2.2-2.3 2.3-2.2-1.5-1.6.7-.5 2.6h-3.2l-.5-2.6-1.6-.7-2.2 1.5-2.3-2.3 1.5-2.2-.7-1.6L2 13.6v-3.2l2.6-.5.7-1.6-1.5-2.2 2.3-2.3 2.2 1.5 1.6-.7z"/><circle cx="12" cy="12" r="3.2" fill="#0a0f1d"/></svg></span></button>
+        <button id="sideHelp" title="Ajuda"><span class="ico"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/><path d="M9 9.2a3 3 0 1 1 4.6 2.5c-1 .7-1.6 1.2-1.6 2.5" stroke="#0a0f1d" stroke-width="2.2" fill="none" stroke-linecap="round"/><circle cx="12" cy="17.4" r="1.3" fill="#0a0f1d"/></svg></span></button>
+        <span class="grow"></span>
+        <button id="sideExit" title="Sair da conta / recarregar"><span class="ico"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 3H4v18h6v-2H6V5h4zm5 4l5 5-5 5v-3.5H9v-3h6z"/></svg></span></button>
+      </nav>
       <div id="infoBody"></div>
     </div>
   </div>
@@ -290,5 +282,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@8.0.7/dist/browser/signalr.min.js"></script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="game.js"></script>
+  <script src="ui.js"></script>
 </body>
 </html>
