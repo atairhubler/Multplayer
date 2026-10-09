@@ -1,7 +1,7 @@
 // Páginas em cache: logo depois de uma atualização o navegador pode misturar um index.html antigo com este game.js novo
 // (faltam elementos, o script quebra no meio e o personagem "trava" até apertar F5). Se faltar algum elemento, recarrega uma vez.
 (() => {
-  const need = ['join', 'stick', 'stickKnob', 'fsBtn', 'fsBtnDesk', 'chat', 'online', 'sfxBtn', 'helpBtn', 'helpModal', 'moveHint', 'arenaRank', 'arenaBar', 'arenaMsg', 'arenaWeapons', 'attackBtn'];
+  const need = ['join', 'dashBtn', 'stick', 'stickKnob', 'fsBtn', 'fsBtnDesk', 'chat', 'online', 'sfxBtn', 'helpBtn', 'helpModal', 'moveHint', 'arenaRank', 'arenaBar', 'arenaMsg', 'arenaWeapons', 'attackBtn'];
   let missing = need.some(id => !document.getElementById(id));
   try {
     if (!missing) { sessionStorage.removeItem('staleReload'); return; }
@@ -504,6 +504,7 @@ function update(time, delta) {
   if (!moveHintDone && (left || right || jump)) hideMoveHint();
   const carrierId = ridingMap[myId()];
   const carrier = carrierId && remotePlayers[carrierId];
+  if (carrier) touch.dashReq = false; // não fica um dash "guardado" para quando descer
   if (!carrier) {
     if (left && !right) facing = -1; else if (right && !left) facing = 1;
     safe(() => handleDash(time, left, right));
@@ -598,7 +599,7 @@ function safe(fn) {
 }
 
 // ---- Controles de toque (celular) ----
-const touch = { left: false, right: false, jump: false, stickUp: false };
+const touch = { left: false, right: false, jump: false, stickUp: false, dashReq: false };
 document.querySelectorAll('#touch button[data-key]').forEach(btn => {
   const key = btn.dataset.key;
   const set = v => e => { e.preventDefault(); touch[key] = v; };
@@ -2374,19 +2375,27 @@ function checkMapEdge(delta, left, right, carrier, dashing = false) {
 }
 
 // ---- Dash: dois toques rápidos para o lado (no chão ou no ar) ----
+function startDash(time, dir) { // devolve true se o dash aconteceu (recarga, empurrão e carona impedem)
+  if (time < dashReadyAt || time < pushUntil || ridingMap[myId()]) return false;
+  dashUntil = time + DASH_MS; dashDir = dir; dashReadyAt = time + DASH_COOLDOWN_MS;
+  if (localDancing) setDancing(false);
+  dashFx(myId(), dir);
+  sfxDash();
+  connection.invoke('Dash', dir).catch(() => {});
+  return true;
+}
+
 function handleDash(time, left, right) {
   const tapL = left && !prevLeft, tapR = right && !prevRight;
   prevLeft = left; prevRight = right;
   for (const [tap, key, dir] of [[tapL, 'left', -1], [tapR, 'right', 1]]) {
     if (!tap) continue;
-    if (time - lastTap[key] <= DASH_TAP_MS && time >= dashReadyAt && time >= pushUntil && !ridingMap[myId()]) {
-      dashUntil = time + DASH_MS; dashDir = dir; dashReadyAt = time + DASH_COOLDOWN_MS;
-      lastTap[key] = -1e9;
-      if (localDancing) setDancing(false);
-      dashFx(myId(), dir);
-      sfxDash();
-      connection.invoke('Dash', dir).catch(() => {});
-    } else lastTap[key] = time;
+    if (time - lastTap[key] <= DASH_TAP_MS && startDash(time, dir)) lastTap[key] = -1e9; // dois toques rápidos
+    else lastTap[key] = time;
+  }
+  if (touch.dashReq) { // botão 💨 do celular: dash para onde a bolinha aponta ou, parado, para onde o personagem olha
+    touch.dashReq = false;
+    startDash(time, left && !right ? -1 : right && !left ? 1 : facing);
   }
 }
 
@@ -2470,6 +2479,7 @@ WEAPONS.forEach((w, i) => {
   weaponsEl.appendChild(b);
 });
 document.getElementById('attackBtn').addEventListener('pointerdown', e => { e.preventDefault(); doAttack(); });
+document.getElementById('dashBtn').addEventListener('pointerdown', e => { e.preventDefault(); touch.dashReq = true; }); // 💨 dash no celular
 window.addEventListener('keydown', e => {
   if (!isCombat() || e.ctrlKey || e.metaKey || e.altKey || !chatReady || !chatBar.hidden || !helpModal.hidden) return;
   if (e.code === 'Space' || e.key.toLowerCase() === 'x') { e.preventDefault(); doAttack(); }
@@ -2687,7 +2697,7 @@ const ARENA_HELP = [
   '🗡️ Atacar: aperte Espaço (ou X). O golpe vai para o lado em que você está virado. No celular, use o botão 🗡️.',
   '🎒 Armas: teclas 1 a 5 ou toque nos ícones embaixo — ⚔️ Espada (equilibrada), 🔱 Lança (alcance longo), 🏹 Arco (flecha à distância), 🔨 Martelo (lento, forte e empurra longe), 🐾 Garras (rápidas, dano baixo).',
   '🏆 Pontos: +1 por golpe que acerta e +10 por derrotar alguém. O ranking fica no canto superior esquerdo.',
-  '💨 Dash: toque duas vezes rápido na seta ← ou →. Vale também no ar! (No celular, empurre a bolinha duas vezes rápido para o lado.)',
+  '💨 Dash: toque duas vezes rápido na seta ← ou →. Vale também no ar! (No celular, use o botão 💨 no canto direito, ou empurre a bolinha duas vezes rápido para o lado.)',
   '🚪 Sair: ande até o começo da arena (esquerda) e segure ← por um instante para voltar ao vilarejo.',
   'Na arena não dá para subir nas costas, dançar, empurrar ou cumprimentar. Emotes: botão 😀 ou /emote N (de 1 a 6).',
 ];
@@ -2703,7 +2713,7 @@ Object.assign(HELP, {
   ],
   dash: [
     '💨 Dash: toque duas vezes rápido na seta ← ou → para dar um pequeno impulso. Vale também no ar! Depois há uma pequena pausa antes de usar de novo.',
-    'No celular, empurre a bolinha da esquerda duas vezes rápido para o lado.',
+    'No celular, use o botão 💨 (canto inferior direito, ao lado do pular) ou empurre a bolinha da esquerda duas vezes rápido para o lado.',
   ],
 });
 HELP_GROUPS.push({ title: '💨 Movimento, floresta e arena', keys: ['dash', 'floresta', 'arena'] });

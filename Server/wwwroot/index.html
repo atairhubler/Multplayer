@@ -136,10 +136,10 @@
     #fsBtn, #talkBtn, #emoteBtn { width: 56px !important; height: 56px !important; font-size: 24px !important; }
     /* celular: balão de chat e emotes ficam na lateral esquerda, acima das setas; o botão de atacar fica ao lado do de pular (mesmo tamanho) */
     #touch > .grp.mid { left: 164px; right: auto; bottom: 16px; flex-direction: column; gap: 10px; } /* coluna ao lado do analógico: tela cheia, chat e emote */
-    /* analógico virtual (esquerda): bolinha que se arrasta; também 70% transparente */
+    /* analógico virtual (esquerda): bolinha que se arrasta; também 50% transparente */
     #stick { pointer-events: auto; position: relative; width: 132px; height: 132px; border-radius: 50%; border: 2px solid #fff8;
-      background: #0006; touch-action: none; opacity: .3; transition: opacity .1s; }
-    #stick.active { opacity: .65; }
+      background: #0006; touch-action: none; opacity: .5; transition: opacity .1s; }
+    #stick.active { opacity: .8; }
     #stickKnob { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%;
       background: #fffb; border: 2px solid #fff; pointer-events: none; }
     /* Aviso para girar o celular (modo paisagem obrigatório) */
@@ -155,9 +155,9 @@
     #touch button { pointer-events: auto; width: 76px; height: 76px; border-radius: 50%; border: 2px solid #fff8;
       background: #0006; color: #fff; font-size: 30px; touch-action: none; }
     #touch button:active { background: #fff5; }
-    /* botões do celular 70% transparentes (30% visíveis) para não atrapalhar a tela; ao tocar ficam mais visíveis */
-    #touch button { opacity: .3; transition: opacity .1s; }
-    #touch button:active { opacity: .65; }
+    /* botões do celular 50% transparentes (50% visíveis) para não atrapalhar a tela; ao tocar ficam mais visíveis */
+    #touch button { opacity: .5; transition: opacity .1s; }
+    #touch button:active { opacity: .85; }
     /* telas baixas (celular na horizontal): tudo um pouco menor para nada ser cortado */
     @media (max-height: 430px) {
       #stick { width: 108px; height: 108px; }
@@ -233,7 +233,7 @@
   <div id="touch">
     <div class="grp"><div id="stick" title="Arraste: lados andam, para cima pula"><div id="stickKnob"></div></div></div>
     <div class="grp mid"><button id="fsBtn" title="Tela cheia">⛶</button><button id="talkBtn" title="Falar">💬</button><button id="emoteBtn" title="Emotes">😀</button></div>
-    <div class="grp"><button id="attackBtn" title="Atacar">🗡️</button><button data-key="jump">▲</button></div>
+    <div class="grp"><button id="dashBtn" title="Dash">💨</button><button id="attackBtn" title="Atacar">🗡️</button><button data-key="jump">▲</button></div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
