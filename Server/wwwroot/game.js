@@ -1082,15 +1082,82 @@ function danceLoop() {
   danceMusic.timer = setTimeout(danceLoop, 80);
 }
 
+// a música calma abaixa enquanto toca a de dança ou a de batalha
+const duckAmbient = () => { if (music.bus) music.bus.gain.setTargetAtTime(danceMusic.on || battleMusic.on ? 0.12 : 1, music.ctx.currentTime, 0.4); };
 function setDanceMusic(on) {
   if (danceMusic.on === on || !music.ctx) return;
   danceMusic.on = on;
-  if (music.bus) music.bus.gain.setTargetAtTime(on ? 0.12 : 1, music.ctx.currentTime, 0.4);
+  duckAmbient();
   if (on) { danceMusic.step = 0; danceMusic.nextAt = 0; danceLoop(); }
   else { clearTimeout(danceMusic.timer); danceMusic.timer = null; }
 }
-const anyoneDancing = () => localDancing || Object.values(remotePlayers).some(r => r.dancing);
-setInterval(() => setDanceMusic(anyoneDancing()), 400);
+const anyoneDancing = () => localDancing || Object.values(remotePlayers).some(r => r.dancing && r.map === currentMap);
+
+// ---- Música de batalha da arena (chiptune 16 bits, ~152 bpm, Lá menor) ----
+// Bumbo e caixa, chimbal, baixo em oitavas, arpejo em onda quadrada e uma nota longa de destaque no início de cada compasso.
+const BATTLE_STEP_S = 60 / 152 / 4; // semicolcheias
+const BATTLE_PROG = [[45, [0, 3, 7]], [41, [0, 4, 7]], [48, [0, 4, 7]], [43, [0, 4, 7]], [45, [0, 3, 7]], [41, [0, 4, 7]], [43, [0, 4, 7]], [40, [0, 4, 7, 10]]]; // Am F C G | Am F G E7
+const BATTLE_ARP = [0, 1, 2, 3, 2, 1, 0, 1, 2, 3, 4, 3, 2, 1, 2, 3];
+const battleMusic = { timer: null, step: 0, nextAt: 0, on: false, noise: null };
+
+function battleNoise(t, dur, gain, type, cutoff) {
+  const ctx = music.ctx;
+  if (!battleMusic.noise) {
+    const buf = ctx.createBuffer(1, ctx.sampleRate * 0.25, ctx.sampleRate), d = buf.getChannelData(0);
+    for (let k = 0; k < d.length; k += 2) d[k] = d[k + 1] = Math.random() * 2 - 1; // ruído "áspero" de chip de som
+    battleMusic.noise = buf;
+  }
+  const src = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+  src.buffer = battleMusic.noise; f.type = type; f.frequency.value = cutoff;
+  g.gain.setValueAtTime(gain, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  src.connect(f); f.connect(g); g.connect(music.master); src.start(t); src.stop(t + dur + 0.02);
+}
+
+function battleStep(t, i) {
+  const ctx = music.ctx, bar = Math.floor(i / 16) % BATTLE_PROG.length, s = i % 16;
+  const [root, tri] = BATTLE_PROG[bar];
+  if (s === 0 || s === 8 || (s === 10 && bar % 2)) { // bumbo
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.frequency.setValueAtTime(170, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.12);
+    g.gain.setValueAtTime(0.6, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+    o.connect(g); g.connect(music.master); o.start(t); o.stop(t + 0.2);
+  }
+  if (s === 4 || s === 12) battleNoise(t, 0.12, 0.3, 'bandpass', 1800); // caixa
+  if (s % 2 === 0) battleNoise(t, 0.04, s % 4 === 0 ? 0.1 : 0.06, 'highpass', 7500); // chimbal
+  if (s % 2 === 0) danceTone(midiFreq(root + (s % 4 === 2 ? 12 : 0)), t, BATTLE_STEP_S * 1.7, 'triangle', 0.2); // baixo em oitavas
+  const k = BATTLE_ARP[s];
+  danceTone(midiFreq(root + 24 + tri[k % tri.length] + 12 * Math.floor(k / tri.length)), t, BATTLE_STEP_S * 1.5, 'square', 0.055); // arpejo
+  if (s === 0) danceTone(midiFreq(root + 36 + tri[bar % tri.length]), t, BATTLE_STEP_S * 4, 'square', 0.05); // destaque
+  if (bar >= 4 && s % 4 === 3) danceTone(midiFreq(root + 31 + tri[(bar + s) % tri.length]), t, BATTLE_STEP_S * 1.2, 'square', 0.04); // contracanto na 2ª metade
+}
+
+function battleLoop() {
+  const ctx = music.ctx;
+  if (!battleMusic.on || !ctx) return;
+  if (ctx.state === 'running') {
+    if (battleMusic.nextAt < ctx.currentTime) battleMusic.nextAt = ctx.currentTime + 0.05;
+    while (battleMusic.nextAt < ctx.currentTime + 0.3) {
+      battleStep(battleMusic.nextAt, battleMusic.step++);
+      battleMusic.nextAt += BATTLE_STEP_S;
+    }
+  }
+  battleMusic.timer = setTimeout(battleLoop, 80);
+}
+
+function setBattleMusic(on) {
+  if (battleMusic.on === on || !music.ctx) return;
+  battleMusic.on = on;
+  duckAmbient();
+  if (on) { battleMusic.step = 0; battleMusic.nextAt = 0; battleLoop(); }
+  else { clearTimeout(battleMusic.timer); battleMusic.timer = null; }
+}
+
+// a batalha tem prioridade sobre a dança; ao sair da arena volta a música calma
+setInterval(() => {
+  const arena = currentMap === 'arena' && !music.muted;
+  setBattleMusic(arena);
+  setDanceMusic(!arena && anyoneDancing());
+}, 400);
 
 muteBtn.addEventListener('click', () => {
   music.muted = !music.muted;
