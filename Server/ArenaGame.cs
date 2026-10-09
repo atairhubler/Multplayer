@@ -76,6 +76,23 @@ public static class ArenaGame
 
     public static bool IsCombatMap(string map) => map == MapName || map == ForestMap;
 
+    // Poção de vida: só faz efeito em quem está em combate (arena/floresta), vivo e com a vida abaixo do máximo
+    public static bool CanHeal(string id)
+    {
+        lock (Gate) return InCombat.TryGetValue(id, out var st) && st.Alive && st.Hp < MaxHp;
+    }
+
+    public static async Task<bool> HealAsync(IHubContext<GameHub> hub, string id, int amount)
+    {
+        lock (Gate)
+        {
+            if (!InCombat.TryGetValue(id, out var st) || !st.Alive || st.Hp >= MaxHp) return false;
+            st.Hp = Math.Min(MaxHp, st.Hp + amount);
+        }
+        await BroadcastState(hub);
+        return true;
+    }
+
     private static Task Send(IHubContext<GameHub> hub, string method, params object?[] args) =>
         hub.Clients.Group(GameHub.Room).SendCoreAsync(method, args); // SendCoreAsync: cada item de args vira um argumento do cliente
 

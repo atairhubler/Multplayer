@@ -92,8 +92,11 @@ public class GameHub(IHubContext<GameHub> hubContext, Db db, Sessions sessions) 
             // devolve o que já foi conquistado nesta conta (títulos, estatísticas, cor do nome...)
             var data = await db.LoadAccountDataAsync(account.Id);
             var pend = Progress.PendingFor(account.Id);
+            me.ActivePotion = Shop.Find(data.ActivePotion) is not null && data.Items.GetValueOrDefault(data.ActivePotion ?? "") > 0 ? data.ActivePotion : null;
             await Clients.Caller.SendAsync("AccountData", new
             {
+                items = data.Items,
+                activePotion = me.ActivePotion,
                 name = account.Name,
                 picture = account.Picture,
                 stats = new { points = data.Stats.Points + pend.Points, playerKills = data.Stats.PlayerKills + pend.PlayerKills, slimeKills = data.Stats.SlimeKills + pend.SlimeKills, deaths = data.Stats.Deaths + pend.Deaths, coins = data.Stats.Coins + pend.Coins },
@@ -104,6 +107,79 @@ public class GameHub(IHubContext<GameHub> hubContext, Db db, Sessions sessions) 
         }
         catch (Exception) { /* sem os dados salvos o jogo segue normal */ }
         return new { ok = true, name = account.Name };
+    }
+
+    // ---------- Loja, inventário e poções (só contas Google) ----------
+    private static readonly ConcurrentDictionary<string, long> LastShopAt = new(), LastPotionAt = new();
+
+    public object GetShop() => new { ok = true, items = Shop.Items.Select(i => new { id = i.Id, name = i.Name, description = i.Description, price = i.Price }) };
+
+    private bool TryAccountOf(out Player me, out long accountId)
+    {
+        accountId = 0;
+        if (Players.TryGetValue(Context.ConnectionId, out var p) && p.AccountId is long id && db.Enabled) { me = p; accountId = id; return true; }
+        me = null!;
+        return false;
+    }
+
+    // Compra uma unidade: o servidor confere o preço e debita as moedas junto com a entrega do item (mesma transação)
+    public async Task<object> BuyItem(string? itemId)
+    {
+        if (!TryAccountOf(out var me, out var id)) return new { ok = false, reason = "Entre com o Google na tela inicial para comprar." };
+        var item = Shop.Find(itemId);
+        if (item is null) return new { ok = false, reason = "Item desconhecido." };
+        var nowMs = Environment.TickCount64;
+        if (LastShopAt.TryGetValue(me.Id, out var last) && nowMs - last < 400) return new { ok = false, reason = "Calma! Um de cada vez." };
+        LastShopAt[me.Id] = nowMs;
+        try
+        {
+            await Progress.FlushAsync(id); // grava antes as moedas que ainda estavam só na memória
+            var res = await db.BuyItemAsync(id, item.Id, item.Price);
+            if (res is null) return new { ok = false, reason = "Moedas insuficientes." };
+            var pend = Progress.PendingFor(id);
+            return new { ok = true, coins = res.Value.Coins + pend.Coins, item = item.Id, qty = res.Value.Qty };
+        }
+        catch (Exception) { return new { ok = false, reason = "Não consegui concluir a compra agora." }; }
+    }
+
+    // Inventário → Ativar: define qual poção fica no botão rápido (ao lado do ataque). null = nenhuma.
+    public async Task<object> SetActivePotion(string? kind)
+    {
+        if (!TryAccountOf(out var me, out var id)) return new { ok = false, reason = "Entre com o Google para usar poções." };
+        if (kind is not null)
+        {
+            if (Shop.Find(kind) is null) return new { ok = false, reason = "Item desconhecido." };
+            try
+            {
+                var data = await db.LoadAccountDataAsync(id);
+                if (data.Items.GetValueOrDefault(kind) <= 0) return new { ok = false, reason = "Você não tem essa poção." };
+            }
+            catch (Exception) { return new { ok = false, reason = "Não consegui ler o inventário agora." }; }
+        }
+        me.ActivePotion = kind;
+        try { await db.SaveActivePotionAsync(id, kind); } catch (Exception) { /* vale nesta sessão; tenta salvar de novo na próxima troca */ }
+        return new { ok = true, active = kind };
+    }
+
+    // Usa a poção ativa. Vida: o servidor cura (só se houver o que curar); mana e stamina: o cliente aplica ao receber o "ok".
+    public async Task<object> UsePotion()
+    {
+        if (!TryAccountOf(out var me, out var id)) return new { ok = false, reason = "Entre com o Google para usar poções." };
+        var item = Shop.Find(me.ActivePotion);
+        if (item is null) return new { ok = false, reason = "Nenhuma poção ativada. Abra o menu → Inventário e escolha Ativar." };
+        var nowMs = Environment.TickCount64;
+        if (LastPotionAt.TryGetValue(me.Id, out var last) && nowMs - last < 1500) return new { ok = false, reason = "Espere um instante para usar outra poção." };
+        if (item.Resource == "life" && !ArenaGame.CanHeal(me.Id)) return new { ok = false, reason = "Sua vida já está cheia (a poção de vida só faz efeito na arena e na floresta)." };
+        LastPotionAt[me.Id] = nowMs;
+        try
+        {
+            var left = await db.ConsumeItemAsync(id, item.Id);
+            if (left is null) { me.ActivePotion = null; return new { ok = false, reason = "Você não tem mais dessa poção.", qty = 0 }; }
+            if (item.Resource == "life") await ArenaGame.HealAsync(hubContext, me.Id, item.Amount);
+            if (left.Value == 0) me.ActivePotion = null; // acabou: o botão rápido esvazia
+            return new { ok = true, kind = item.Id, resource = item.Resource, amount = item.Amount, qty = left.Value };
+        }
+        catch (Exception) { return new { ok = false, reason = "Não consegui usar a poção agora." }; }
     }
 
     // /ranking: os 10 com mais pontos de combate de todos os tempos (contas Google)
@@ -524,6 +600,8 @@ public class GameHub(IHubContext<GameHub> hubContext, Db db, Sessions sessions) 
         LastDashAt.TryRemove(id, out _);
         LastMapAt.TryRemove(id, out _);
         LastHomeAt.TryRemove(id, out _);
+        LastShopAt.TryRemove(id, out _);
+        LastPotionAt.TryRemove(id, out _);
         GreetPending.TryRemove(id, out _);
         GreetCount.TryRemove(id, out _);
         DanceStartedAt.TryRemove(id, out _);

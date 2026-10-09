@@ -135,3 +135,33 @@
 /* moedas ao lado dos pontos na barra do topo */
 #coinsChip { display: flex; align-items: center; gap: 5px; background: #0009; border: 1px solid #ffffff30; border-radius: 16px; padding: 4px 12px; color: #ffe066; font-weight: 700; font-size: 16px; text-shadow: 1px 1px 2px #000; }
 @media (max-height: 430px), (max-width: 760px) { #coinsChip { font-size: 13px; padding: 2px 8px; } }
+
+/* ===== Poções: botão rápido, loja e inventário ===== */
+.ico.potion.big { font-size: 44px; } .ico.potion.huge { font-size: 84px; }
+.potBtn { position: relative; display: flex; align-items: center; justify-content: center; padding: 0; color: #fff; cursor: pointer; }
+.potBtn .ico.potion { font-size: 62%; width: 1em; height: 1em; }
+#potionBtn { font-size: 34px; } #potionBtn .ico.potion { font-size: 40px; }
+#potionBtnDesk { position: fixed; right: 100px; bottom: 12px; z-index: 6; width: 52px; height: 52px; border-radius: 50%; border: 2px solid #fff9; background: rgba(0,0,0,.6); }
+#potionBtnDesk .ico.potion { font-size: 32px; }
+#potionBtnDesk[hidden] { display: none; }
+.potBtn .plus { font-size: 26px; opacity: .7; }
+.potBtn.empty { border-style: dashed; }
+.potBtn .badge { position: absolute; right: -2px; bottom: -2px; min-width: 20px; padding: 0 5px; border-radius: 10px; background: #e0b04a; color: #221800; font: 700 12px/20px sans-serif; text-align: center; }
+.shopRow { display: flex; align-items: center; gap: 14px; background: #1a2340; border: 1px solid #2f3b60; padding: 12px 14px; margin-bottom: 8px; font-family: sans-serif; }
+.shopRow > div:first-of-type { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.shopRow b { font-size: 17px; } .shopRow span { color: #9aa9c4; font-size: 13px; } .shopRow em { font-style: normal; color: #cfe0ff; font-size: 12px; }
+.shopRow .price { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.shopRow .price span { color: #ffe066; font-weight: 700; font-size: 15px; }
+.shopRow button, .invDetail button, .invWrap > button.wide { font-family: inherit; background: linear-gradient(#303d5a, #212c47); border: 1px solid var(--edge); color: #cfe0ff; padding: 7px 16px; cursor: pointer; }
+.shopRow button:disabled, .invDetail button:disabled { opacity: .45; cursor: default; }
+.invWrap { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; font-family: sans-serif; }
+.invGrid { display: grid; grid-template-columns: repeat(auto-fill, 72px); gap: 8px; flex: 1 1 240px; }
+.invSlot { position: relative; width: 72px; height: 72px; background: #1a2340; border: 2px solid #34436a; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; color: #fff; }
+.invSlot .ico.potion { font-size: 44px; }
+.invSlot.sel { border-color: var(--gold); } .invSlot.active { background: #2c3a1c; }
+.invSlot .badge { position: absolute; right: 3px; bottom: 2px; font: 700 12px sans-serif; color: #fff; text-shadow: 1px 1px 2px #000; }
+.invSlot .tag { position: absolute; left: 2px; top: 2px; font: 700 9px sans-serif; background: #4caf50; color: #fff; padding: 0 3px; }
+.invDetail { flex: 1 1 240px; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; background: #1a2340; border: 1px solid #2f3b60; padding: 14px; }
+.invDetail h3 { margin: 0; } .invDetail p { margin: 2px 0; } .invDetail .desc { color: #cfe0ff; font-size: 14px; }
+.invDetail .wide { width: 100%; } .invDetail .wide.primary, .invWrap .wide.primary { background: linear-gradient(#d8a63a, #a87414); color: #221800; font-weight: 700; }
+#infoBody .note.good { color: #8be37f; } #infoBody .note.bad { color: #ff9a8f; }

@@ -3,6 +3,7 @@ public class Player
     public string Id { get; set; } = "";
     public string Name { get; set; } = "";
     [System.Text.Json.Serialization.JsonIgnore] public long? AccountId { get; set; } // conta (login com Google); nunca vai para os outros jogadores
+    [System.Text.Json.Serialization.JsonIgnore] public string? ActivePotion { get; set; } // poção do botão rápido (life|mana|stamina)
     public string Map { get; set; } = "village"; // "village" (vilarejo), "forest" (floresta) ou "arena"
     public string CharacterSprite { get; set; } = "";
     public float X { get; set; }

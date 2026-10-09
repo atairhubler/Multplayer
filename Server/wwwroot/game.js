@@ -1,7 +1,7 @@
 // Páginas em cache: logo depois de uma atualização o navegador pode misturar um index.html antigo com este game.js novo
 // (faltam elementos, o script quebra no meio e o personagem "trava" até apertar F5). Se faltar algum elemento, recarrega uma vez.
 (() => {
-  const need = ['join', 'menuBtn', 'infoModal', 'infoBody', 'playerHud', 'screenHead', 'settingsSource', 'googleBtn', 'accountBox', 'accountName', 'logoutBtn', 'minimap', 'dashBtn', 'stick', 'stickKnob', 'fsBtn', 'fsBtnDesk', 'chat', 'online', 'sfxBtn', 'helpBtn', 'helpModal', 'moveHint', 'arenaRank', 'arenaBar', 'arenaMsg', 'arenaWeapons', 'attackBtn'];
+  const need = ['join', 'potionBtn', 'potionBtnDesk', 'menuBtn', 'infoModal', 'infoBody', 'playerHud', 'screenHead', 'settingsSource', 'googleBtn', 'accountBox', 'accountName', 'logoutBtn', 'minimap', 'dashBtn', 'stick', 'stickKnob', 'fsBtn', 'fsBtnDesk', 'chat', 'online', 'sfxBtn', 'helpBtn', 'helpModal', 'moveHint', 'arenaRank', 'arenaBar', 'arenaMsg', 'arenaWeapons', 'attackBtn'];
   let missing = need.some(id => !document.getElementById(id));
   try {
     if (!missing) { sessionStorage.removeItem('staleReload'); return; }
@@ -1598,7 +1598,8 @@ function equipTitle(t) {
 }
 // Dados salvos na conta Google: títulos (somados aos do navegador), cor do nome e título equipado
 function onAccountData(d) {
-  accountInfo = { name: d.name, picture: d.picture || null, stats: d.stats || null };
+  accountInfo = { name: d.name, picture: d.picture || null, stats: d.stats || null, items: d.items || {}, activePotion: d.activePotion || null };
+  if (typeof renderPotionButtons === 'function') renderPotionButtons(); // (ui.js) botão rápido da poção ativada
   const merged = [...new Set([...getTitles(), ...(d.titles || [])])];
   try { localStorage.setItem('titles', JSON.stringify(merged)); } catch {}
   if (d.nameColor && /^#[0-9a-f]{6}$/i.test(d.nameColor)) { localInfo.nameColor = d.nameColor; cName.value = d.nameColor; saveProfile(); }

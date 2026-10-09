@@ -91,6 +91,15 @@ public sealed class Db
             -- colunas acrescentadas depois (rodar de novo não faz mal)
             ALTER TABLE account_stats ADD COLUMN IF NOT EXISTS coins bigint NOT NULL DEFAULT 0;   -- moedas (drops dos slimes)
             ALTER TABLE account_profile ADD COLUMN IF NOT EXISTS character text;                    -- aparência do boneco (char:m|f:cabelo:pele:roupa)
+            ALTER TABLE account_profile ADD COLUMN IF NOT EXISTS active_potion text;                -- poção do botão rápido (life|mana|stamina)
+
+            -- inventário: quantidade de cada item que a conta possui
+            CREATE TABLE IF NOT EXISTS account_items (
+                account_id bigint NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                item       text NOT NULL,
+                qty        integer NOT NULL DEFAULT 0 CHECK (qty >= 0),
+                PRIMARY KEY (account_id, item)
+            );
             """);
         await cmd.ExecuteNonQueryAsync();
     }
@@ -173,7 +182,8 @@ public sealed class Db
     {
         var stats = new AccountStats(0, 0, 0, 0, 0);
         var titles = new List<string>();
-        string? color = null, equipped = null, character = null;
+        string? color = null, equipped = null, character = null, activePotion = null;
+        var items = new Dictionary<string, int>();
         await using (var cmd = Source.CreateCommand("SELECT points, player_kills, slime_kills, deaths, coins FROM account_stats WHERE account_id = $1"))
         {
             cmd.Parameters.AddWithValue(accountId);
@@ -186,7 +196,7 @@ public sealed class Db
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync()) titles.Add(r.GetString(0));
         }
-        await using (var cmd = Source.CreateCommand("SELECT name_color, equipped_title, character FROM account_profile WHERE account_id = $1"))
+        await using (var cmd = Source.CreateCommand("SELECT name_color, equipped_title, character, active_potion FROM account_profile WHERE account_id = $1"))
         {
             cmd.Parameters.AddWithValue(accountId);
             await using var r = await cmd.ExecuteReaderAsync();
@@ -195,9 +205,66 @@ public sealed class Db
                 color = r.IsDBNull(0) ? null : r.GetString(0);
                 equipped = r.IsDBNull(1) ? null : r.GetString(1);
                 character = r.IsDBNull(2) ? null : r.GetString(2);
+                activePotion = r.IsDBNull(3) ? null : r.GetString(3);
             }
         }
-        return new AccountData(stats, titles, color, equipped, character);
+        await using (var cmd = Source.CreateCommand("SELECT item, qty FROM account_items WHERE account_id = $1 AND qty > 0"))
+        {
+            cmd.Parameters.AddWithValue(accountId);
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync()) items[r.GetString(0)] = r.GetInt32(1);
+        }
+        return new AccountData(stats, titles, color, equipped, character, items, activePotion);
+    }
+
+    // Compra: debita as moedas e soma o item NA MESMA transação (ou nada acontece). Devolve null se faltar moeda.
+    public async Task<(long Coins, int Qty)?> BuyItemAsync(long accountId, string item, int price)
+    {
+        await using var conn = await Source.OpenConnectionAsync();
+        await using var tx = await conn.BeginTransactionAsync();
+        long coins;
+        await using (var cmd = new Npgsql.NpgsqlCommand("UPDATE account_stats SET coins = coins - $2, updated_at = now() WHERE account_id = $1 AND coins >= $2 RETURNING coins", conn, tx))
+        {
+            cmd.Parameters.AddWithValue(accountId);
+            cmd.Parameters.AddWithValue((long)price);
+            var res = await cmd.ExecuteScalarAsync();
+            if (res is null) return null; // sem moedas suficientes (ou sem linha de estatísticas ainda)
+            coins = (long)res;
+        }
+        int qty;
+        await using (var cmd = new Npgsql.NpgsqlCommand("""
+            INSERT INTO account_items (account_id, item, qty) VALUES ($1, $2, 1)
+            ON CONFLICT (account_id, item) DO UPDATE SET qty = account_items.qty + 1
+            RETURNING qty
+            """, conn, tx))
+        {
+            cmd.Parameters.AddWithValue(accountId);
+            cmd.Parameters.AddWithValue(item);
+            qty = (int)(await cmd.ExecuteScalarAsync())!;
+        }
+        await tx.CommitAsync();
+        return (coins, qty);
+    }
+
+    // Gasta uma unidade do item (só se houver). Devolve a quantidade que sobrou, ou null se não tinha.
+    public async Task<int?> ConsumeItemAsync(long accountId, string item)
+    {
+        await using var cmd = Source.CreateCommand("UPDATE account_items SET qty = qty - 1 WHERE account_id = $1 AND item = $2 AND qty > 0 RETURNING qty");
+        cmd.Parameters.AddWithValue(accountId);
+        cmd.Parameters.AddWithValue(item);
+        var res = await cmd.ExecuteScalarAsync();
+        return res is null ? null : (int)res;
+    }
+
+    public async Task SaveActivePotionAsync(long accountId, string? potion)
+    {
+        await using var cmd = Source.CreateCommand("""
+            INSERT INTO account_profile (account_id, active_potion) VALUES ($1, $2)
+            ON CONFLICT (account_id) DO UPDATE SET active_potion = EXCLUDED.active_potion, updated_at = now()
+            """);
+        cmd.Parameters.AddWithValue(accountId);
+        cmd.Parameters.AddWithValue((object?)potion ?? DBNull.Value);
+        await cmd.ExecuteNonQueryAsync();
     }
 
     // Ranking permanente: quem tem mais pontos de combate

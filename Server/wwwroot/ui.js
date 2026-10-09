@@ -132,6 +132,8 @@ function updateUi() {
   if (ui.hud.hidden) return;
   const r = phaserGame.canvas.getBoundingClientRect();
   ui.hud.style.left = r.left + 10 + 'px'; ui.hud.style.top = r.top + 8 + 'px';
+  const desk = potionBtns[1]; // botão da poção no computador: círculo no canto inferior direito, acima do ? e da tela cheia
+  if (desk) { desk.style.right = innerWidth - r.right + 12 + 'px'; desk.style.bottom = innerHeight - r.bottom + 58 + 'px'; }
   updateHud();
 }
 
@@ -145,6 +147,7 @@ function restoreSettingsButtons() { // os botões de música/efeitos moram no me
 }
 function openScreen(title, icon) {
   restoreSettingsButtons();
+  potionWindow = null; // (as janelas de loja/inventário se marcam depois)
   infoTitle.textContent = title;
   screenIcon.replaceChildren(iconSvg(icon));
   infoBody.replaceChildren();
@@ -154,7 +157,7 @@ function openScreen(title, icon) {
   updateHud();
   return infoBody;
 }
-function closeInfo() { infoModal.hidden = true; restoreSettingsButtons(); }
+function closeInfo() { infoModal.hidden = true; potionWindow = null; restoreSettingsButtons(); }
 document.getElementById('infoClose').addEventListener('click', closeInfo);
 window.addEventListener('keydown', e => { if (e.key === 'Escape' && !infoModal.hidden) closeInfo(); });
 
@@ -184,8 +187,8 @@ function showMenu() {
     { label: 'Cidade', icon: 'castle', run: goHome },
     { label: 'Ajuda', icon: 'help', run: () => { closeInfo(); helpModal.hidden = false; } },
     { label: 'Configurações', icon: 'gear', run: showSettings },
-    { label: 'Inventário', icon: 'bag', soon: true },
-    { label: 'Loja', icon: 'shop', soon: true },
+    { label: 'Inventário', icon: 'bag', run: showInventory },
+    { label: 'Loja', icon: 'shop', run: showShop },
     { label: 'Missões', icon: 'scroll', soon: true },
     { label: 'Sair', icon: 'exit', run: () => { if (sessionToken) clearAccount(); location.reload(); } }, // sai da conta (se houver) e volta à tela inicial
   ];
@@ -327,9 +330,170 @@ function showSettings() {
   body.append(box);
 }
 
+// ---------- Poções: loja, inventário e botão rápido ----------
+// Compra na Loja (moedas) → fica na mochila → Inventário → "Ativar" põe a poção no botão rápido ao lado do ataque (ou tecla F).
+// O servidor decide preços, quantidades e a cura de vida; mana e stamina são aplicadas aqui quando o servidor confirma o uso.
+const POTION_COLORS = { life: ['#ff6b5e', '#b3261e'], mana: ['#6bb6ff', '#1f5fb8'], stamina: ['#8be37f', '#2b8a3a'] };
+const POTION_NAMES = { life: 'Poção de Vida', mana: 'Poção de Mana', stamina: 'Poção de Stamina' };
+const POTION_DESCRIPTIONS = { life: 'Recupera 40 de vida (arena e floresta).', mana: 'Recupera 50 de mana.', stamina: 'Recupera 60 de stamina.' };
+
+function potionIcon(kind, cls = '') {
+  const [light, dark] = POTION_COLORS[kind] || ['#ccc', '#777'];
+  const d = document.createElement('span');
+  d.className = 'ico potion ' + cls;
+  d.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 2.5h6v2h-1V8l4.7 8.6A3 3 0 0 1 16.1 21H7.9a3 3 0 0 1-2.6-4.4L10 8V4.5H9z" fill="#dfe8f5" fill-opacity=".28" stroke="#dfe8f5" stroke-width="1.2"/><path d="M7.2 15.4L10 10h4l2.8 5.4A1.6 1.6 0 0 1 15.4 18H8.6a1.6 1.6 0 0 1-1.4-2.6z" fill="${dark}"/><path d="M8 15.8l2.2-4.4h3.6L16 15.8z" fill="${light}"/><rect x="8.6" y="1.2" width="6.8" height="2" rx=".8" fill="#9b7a4b"/></svg>`;
+  return d;
+}
+
+const ownedItems = () => accountInfo?.items || (accountInfo ? (accountInfo.items = {}) : {});
+const activePotion = () => accountInfo?.activePotion || null;
+let lastPotionAt = 0;
+
+// botão rápido (celular: ao lado do ataque; computador: círculo no canto inferior direito, como nas skills do jogo de referência)
+const potionBtns = [document.getElementById('potionBtn'), document.getElementById('potionBtnDesk')];
+function renderPotionButtons() {
+  const kind = activePotion(), qty = kind ? (ownedItems()[kind] || 0) : 0;
+  for (const b of potionBtns) {
+    if (!b) continue;
+    b.replaceChildren();
+    b.classList.toggle('empty', !kind);
+    if (kind) { b.append(potionIcon(kind), uiEl('span', String(qty), 'badge')); b.title = `${POTION_NAMES[kind]} (tecla F) — restam ${qty}`; }
+    else { b.append(uiEl('span', '＋', 'plus')); b.title = 'Nenhuma poção ativada: abra o Inventário (menu) e escolha Ativar'; }
+  }
+}
+potionBtns.forEach(b => b?.addEventListener('pointerdown', e => { e.preventDefault(); usePotion(); }));
+potionBtns.forEach(b => b?.addEventListener('contextmenu', e => e.preventDefault()));
+
+async function usePotion() {
+  const now = Date.now();
+  if (now - lastPotionAt < 1500) return;
+  if (!sessionToken) { say(['Entre com o Google na tela inicial para comprar e usar poções.']); return; }
+  const kind = activePotion();
+  if (!kind) { showInventory(); return; } // nada ativado: leva para a mochila
+  if (kind === 'mana' && manaNow() >= MANA_MAX - 1) { say(['Sua mana já está cheia.']); return; }
+  if (kind === 'stamina' && staminaNow() >= STAMINA_MAX - 1) { say(['Sua stamina já está cheia.']); return; }
+  lastPotionAt = now;
+  try {
+    const r = await connection.invoke('UsePotion');
+    if (!r?.ok) { say([r?.reason || 'Não foi possível usar a poção.']); if (r?.qty === 0) { ownedItems()[kind] = 0; accountInfo.activePotion = null; renderPotionButtons(); } return; }
+    ownedItems()[kind] = r.qty;
+    if (r.qty <= 0) accountInfo.activePotion = null;
+    if (r.resource === 'mana') { manaNow(); manaValue = Math.min(MANA_MAX, manaValue + r.amount); }
+    if (r.resource === 'stamina') { staminaNow(); staminaValue = Math.min(STAMINA_MAX, staminaValue + r.amount); }
+    renderPotionButtons();
+    potionFx(r.resource, r.amount);
+    if (r.qty <= 0) say([`Acabaram as ${POTION_NAMES[kind]}s. Compre mais na Loja.`]);
+    if (!infoModal.hidden) refreshOpenPotionWindow();
+  } catch { say(['Essa função ainda não está no servidor (ele pode estar atualizando). Tente de novo em alguns minutos.']); }
+}
+function potionFx(resource, amount) {
+  const sprite = localSprite; if (!sprite || !gameScene) return;
+  const color = { life: '#ff8a80', mana: '#82c8ff', stamina: '#a5f09a' }[resource] || '#fff';
+  const label = { life: '❤', mana: '💧', stamina: '⚡' }[resource] || '';
+  const t = gameScene.add.text(sprite.x, sprite.y - 60, `+${amount} ${label}`, { fontSize: '18px', fontStyle: 'bold', color, stroke: '#000', strokeThickness: 4 }).setOrigin(0.5).setDepth(9);
+  gameScene.tweens.add({ targets: t, y: t.y - 36, alpha: 0, duration: 900, ease: 'Quad.Out', onComplete: () => t.destroy() });
+  chip([523, 659, 784, 1047], 0.04, 'triangle', 0.1);
+}
+window.addEventListener('keydown', e => {
+  if (e.key.toLowerCase() !== 'f' || e.repeat || e.ctrlKey || e.metaKey || e.altKey || !chatReady || !chatBar.hidden || !helpModal.hidden || !infoModal.hidden) return;
+  usePotion();
+});
+
+let potionWindow = null; // 'shop' | 'inventory' enquanto aberta (para atualizar depois de usar poção)
+const refreshOpenPotionWindow = () => { if (potionWindow === 'inventory') showInventory(selectedItem); else if (potionWindow === 'shop') showShop(); };
+
+// ----- Loja -----
+async function showShop() {
+  const body = openScreen('Loja', 'shop');
+  potionWindow = 'shop';
+  const box = uiEl('div', undefined, 'listBox');
+  body.append(box);
+  if (!sessionToken) { box.append(uiEl('p', 'Entre com o Google na tela inicial para comprar. As moedas e o que você compra ficam salvos na sua conta.', 'note')); return; }
+  box.append(uiEl('p', 'Carregando...', 'note'));
+  let shop;
+  try { shop = await connection.invoke('GetShop'); } catch { box.replaceChildren(uiEl('p', 'A loja ainda não está no servidor (ele pode estar atualizando). Tente de novo em alguns minutos.', 'note')); return; }
+  box.replaceChildren();
+  const msg = uiEl('p', 'Você ganha moedas derrotando slimes na floresta.', 'note');
+  for (const it of shop.items) {
+    const row = uiEl('div', undefined, 'shopRow');
+    const txt = uiEl('div'); txt.append(uiEl('b', it.name), uiEl('span', it.description), uiEl('em', `Você tem: ${ownedItems()[it.id] || 0}`));
+    const price = uiEl('div', undefined, 'price'); price.append(uiEl('span', `🪙 ${it.price}`));
+    const buy = uiEl('button', 'Comprar'); buy.disabled = totalCoins() < it.price;
+    buy.addEventListener('click', async () => {
+      buy.disabled = true;
+      try {
+        const r = await connection.invoke('BuyItem', it.id);
+        if (!r?.ok) { msg.textContent = r?.reason || 'Não foi possível comprar.'; msg.className = 'note bad'; }
+        else {
+          accountInfo.stats = { ...(accountInfo.stats || {}), coins: r.coins }; sessionCoins = 0; // o servidor manda o total certo
+          ownedItems()[r.item] = r.qty; renderPotionButtons();
+          msg.textContent = `✔ Você comprou 1 ${it.name}. Vá ao Inventário e escolha Ativar para colocá-la no botão rápido.`; msg.className = 'note good';
+          updateHud();
+        }
+      } catch { msg.textContent = 'A compra não está disponível agora. Tente de novo em alguns minutos.'; msg.className = 'note bad'; }
+      refreshRows();
+    });
+    price.append(buy);
+    row.append(potionIcon(it.id, 'big'), txt, price);
+    row.dataset.price = it.price; row.dataset.kind = it.id; row._buy = buy;
+    box.append(row);
+  }
+  box.append(msg);
+  function refreshRows() { // moedas e quantidades novas depois de uma compra
+    for (const r of box.querySelectorAll('.shopRow')) {
+      r._buy.disabled = totalCoins() < Number(r.dataset.price);
+      r.querySelector('em').textContent = `Você tem: ${ownedItems()[r.dataset.kind] || 0}`;
+    }
+  }
+}
+
+// ----- Inventário (mochila) -----
+let selectedItem = null;
+function showInventory(select) {
+  const body = openScreen('Inventário', 'bag');
+  potionWindow = 'inventory';
+  if (typeof select === 'string') selectedItem = select;
+  const wrap = uiEl('div', undefined, 'invWrap');
+  body.append(wrap);
+  if (!sessionToken) { wrap.append(uiEl('p', 'Entre com o Google na tela inicial para ter uma mochila. Os itens ficam salvos na sua conta.', 'note')); return; }
+  const owned = Object.entries(ownedItems()).filter(([, q]) => q > 0);
+  const grid = uiEl('div', undefined, 'invGrid');
+  const detail = uiEl('div', undefined, 'invDetail');
+  if (!owned.length) {
+    wrap.append(uiEl('p', 'Sua mochila está vazia. Derrote slimes para ganhar moedas e compre poções na Loja.', 'note'));
+    const go = uiEl('button', 'Ir para a Loja', 'wide'); go.addEventListener('click', showShop); wrap.append(go);
+    return;
+  }
+  if (!selectedItem || !(ownedItems()[selectedItem] > 0)) selectedItem = owned[0][0];
+  for (const [kind, qty] of owned) {
+    const slot = uiEl('button', undefined, 'invSlot' + (kind === selectedItem ? ' sel' : '') + (kind === activePotion() ? ' active' : ''));
+    slot.append(potionIcon(kind), uiEl('span', String(qty), 'badge'));
+    if (kind === activePotion()) slot.append(uiEl('span', 'ATIVA', 'tag'));
+    slot.title = POTION_NAMES[kind];
+    slot.addEventListener('click', () => { selectedItem = kind; showInventory(); });
+    grid.append(slot);
+  }
+  const kind = selectedItem, isActive = kind === activePotion();
+  detail.append(potionIcon(kind, 'huge'), uiEl('h3', POTION_NAMES[kind]), uiEl('p', POTION_DESCRIPTIONS[kind], 'desc'), uiEl('p', `Quantidade: ${ownedItems()[kind]}`, 'qtyLine'));
+  const status = uiEl('p', isActive ? '✔ Esta poção está no botão rápido (tecla F).' : 'Ative para colocá-la no botão ao lado do ataque.', 'note');
+  const act = uiEl('button', isActive ? 'Desativar' : 'Ativar', 'wide' + (isActive ? '' : ' primary'));
+  act.addEventListener('click', async () => {
+    act.disabled = true;
+    try {
+      const r = await connection.invoke('SetActivePotion', isActive ? null : kind);
+      if (r?.ok) { accountInfo.activePotion = r.active; renderPotionButtons(); showInventory(); }
+      else { status.textContent = r?.reason || 'Não foi possível ativar.'; status.className = 'note bad'; act.disabled = false; }
+    } catch { status.textContent = 'Essa função ainda não está no servidor. Tente de novo em alguns minutos.'; status.className = 'note bad'; act.disabled = false; }
+  });
+  detail.append(act, status);
+  wrap.append(grid, detail);
+}
+
 // ---------- Inicialização (depois de entrar no jogo) ----------
 function setupUi() {
   ui.hud.hidden = false;
   drawPortrait(ui.face, myCharacter);
+  if (potionBtns[1]) potionBtns[1].hidden = coarsePointer; // no celular o botão da poção fica ao lado do ataque (#potionBtn)
+  renderPotionButtons();
   setInterval(updateHud, 400);
 }
