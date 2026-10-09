@@ -11,6 +11,7 @@ const ICON_PATHS = {
   castle: '<path d="M2.5 21.5V8h3.5V5h2.5v3h2V5H13v3h2V5h2.5v3H21v13.5h-5.5v-5.2a3.5 3.5 0 0 0-7 0v5.2z"/>',
   help: '<circle cx="12" cy="12" r="10"/><path d="M9 9.2a3 3 0 1 1 4.6 2.5c-1 .7-1.6 1.2-1.6 2.5" stroke="#2b3752" stroke-width="2.2" fill="none" stroke-linecap="round"/><circle cx="12" cy="17.4" r="1.3" fill="#2b3752"/>',
   gear: '<path d="M10.4 2h3.2l.5 2.6 1.6.7 2.2-1.5 2.3 2.3-1.5 2.2.7 1.6 2.6.5v3.2l-2.6.5-.7 1.6 1.5 2.2-2.3 2.3-2.2-1.5-1.6.7-.5 2.6h-3.2l-.5-2.6-1.6-.7-2.2 1.5-2.3-2.3 1.5-2.2-.7-1.6L2 13.6v-3.2l2.6-.5.7-1.6-1.5-2.2 2.3-2.3 2.2 1.5 1.6-.7z"/><circle cx="12" cy="12" r="3.2" fill="#2b3752"/>',
+  grid: '<rect x="2.5" y="5.5" width="5" height="5.5" rx="1"/><rect x="9.5" y="5.5" width="5" height="5.5" rx="1"/><rect x="16.5" y="5.5" width="5" height="5.5" rx="1"/><rect x="2.5" y="13" width="5" height="5.5" rx="1"/><rect x="9.5" y="13" width="5" height="5.5" rx="1"/><rect x="16.5" y="13" width="5" height="5.5" rx="1"/>',
   bag: '<path d="M8.5 5.5V5a3.5 3.5 0 0 1 7 0v.5H18l1.5 15.5h-15L6 5.5z"/><rect x="9.5" y="10" width="5" height="3" rx="1" fill="#2b3752"/>',
   shop: '<ellipse cx="12" cy="6" rx="8" ry="3.2"/><path d="M4 8.5v3.2c0 1.8 3.6 3.3 8 3.3s8-1.5 8-3.3V8.5c-1.6 1.4-4.6 2.2-8 2.2s-6.4-.8-8-2.2zM4 14v3.2c0 1.8 3.6 3.3 8 3.3s8-1.5 8-3.3V14c-1.6 1.4-4.6 2.2-8 2.2S5.6 15.4 4 14z"/>',
   scroll: '<rect x="4.5" y="3" width="15" height="18" rx="2.5"/><path d="M9.3 9.4a2.7 2.7 0 1 1 4.1 2.2c-.9.6-1.4 1-1.4 2.1" stroke="#2b3752" stroke-width="2" fill="none" stroke-linecap="round"/><circle cx="12" cy="16.8" r="1.2" fill="#2b3752"/>',
@@ -92,17 +93,16 @@ function updateUi() {
 
 // ---------- Tela cheia do menu e janelas ----------
 const infoModal = document.getElementById('infoModal'), infoTitle = document.getElementById('infoTitle'), infoBody = document.getElementById('infoBody');
-const screenIcon = document.getElementById('screenIcon'), screenSide = document.getElementById('screenSide');
+const screenIcon = document.getElementById('screenIcon');
 const settingsSource = document.getElementById('settingsSource');
 
 function restoreSettingsButtons() { // os botões de música/efeitos moram no menu de configurações só enquanto ele está aberto
   for (const id of ['muteBtn', 'sfxBtn']) { const b = document.getElementById(id); if (b && b.parentElement !== settingsSource) settingsSource.appendChild(b); }
 }
-function openScreen(title, icon, { side = false } = {}) {
+function openScreen(title, icon) {
   restoreSettingsButtons();
   infoTitle.textContent = title;
   screenIcon.replaceChildren(iconSvg(icon));
-  screenSide.hidden = !side;
   infoBody.replaceChildren();
   infoBody.scrollTop = 0;
   infoModal.hidden = false;
@@ -130,7 +130,7 @@ function playersByMap() {
 
 // ----- Menu (grade de botões) -----
 function showMenu() {
-  const body = openScreen('Menu', 'bag', { side: true });
+  const body = openScreen('Menu', 'grid');
   const grid = uiEl('div', undefined, 'menuGrid');
   const tiles = [
     { label: 'Perfil', icon: 'profile', run: showProfile },
@@ -143,6 +143,7 @@ function showMenu() {
     { label: 'Inventário', icon: 'bag', soon: true },
     { label: 'Loja', icon: 'shop', soon: true },
     { label: 'Missões', icon: 'scroll', soon: true },
+    { label: 'Sair', icon: 'exit', run: () => { if (sessionToken) clearAccount(); location.reload(); } }, // sai da conta (se houver) e volta à tela inicial
   ];
   for (const t of tiles) {
     const b = uiEl('button', undefined, 'tile' + (t.soon ? ' disabled' : ''));
@@ -153,9 +154,6 @@ function showMenu() {
   body.append(grid);
 }
 document.getElementById('menuBtn').addEventListener('click', () => { if (infoModal.hidden) showMenu(); else closeInfo(); });
-for (const [id, fn] of [['sideSettings', () => showSettings()], ['sideHelp', () => { closeInfo(); helpModal.hidden = false; }], ['sideExit', () => { if (sessionToken) { clearAccount(); } location.reload(); }]]) {
-  document.getElementById(id).addEventListener('click', fn);
-}
 
 // ----- Perfil (estilo ficha do personagem) -----
 function showProfile() {
