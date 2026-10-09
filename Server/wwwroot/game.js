@@ -560,6 +560,7 @@ function update(time, delta) {
   safe(positionChat);
   if (currentMap === 'village') safe(() => updateBackground(this, time));
   safe(updateSlimes);
+  safe(updateHeldWeapons);
   safe(drawArenaBars);
   safe(() => updateArrows(delta));
 }
@@ -813,6 +814,39 @@ async function drawDollPreview(canvas, config) {
   }
 }
 
+// Armas na mão do boneco (desenhadas por código, apontando para cima a partir da mão; unidades do boneco, antes da escala)
+const WEAPON_TILT = [0.8, 0.55, 0.2, 0.65, 0.95]; // inclinação de cada arma na mão (rad): espada, lança, arco, martelo, garras
+function drawWeapon(g, kind) {
+  const line = (w, c, x0, y0, x1, y1) => g.lineStyle(w, c, 1).lineBetween(x0, y0, x1, y1);
+  if (kind === 0) { // espada
+    line(2.8, 0x1b1b1b, 0, 2, 0, -17.5);
+    line(1.7, 0xdfe8f2, 0, -3.5, 0, -17);
+    g.fillStyle(0xdfe8f2, 1).fillTriangle(-1.3, -17, 1.3, -17, 0, -20.5);
+    line(3.4, 0x1b1b1b, -4, -3, 4, -3); line(2.2, 0xe0a82e, -3.6, -3, 3.6, -3); // guarda
+    line(2.4, 0x1b1b1b, 0, 2.5, 0, -2.5); line(1.4, 0x7a4524, 0, 2.2, 0, -2.4); // cabo
+  } else if (kind === 1) { // lança
+    line(2.2, 0x1b1b1b, 0, 9, 0, -23); line(1.3, 0x9a6a38, 0, 9, 0, -23);
+    g.fillStyle(0x1b1b1b, 1).fillTriangle(-3, -22, 3, -22, 0, -31);
+    g.fillStyle(0xdfe8f2, 1).fillTriangle(-2.1, -22.5, 2.1, -22.5, 0, -29.5);
+  } else if (kind === 2) { // arco
+    const a0 = Math.PI * 0.62, a1 = Math.PI * 1.38, cx = 5, cy = -8, r = 11;
+    g.lineStyle(3, 0x1b1b1b, 1).beginPath().arc(cx, cy, r, a0, a1).strokePath();
+    g.lineStyle(1.7, 0x9a6a38, 1).beginPath().arc(cx, cy, r, a0, a1).strokePath();
+    line(0.8, 0xffffff, cx + Math.cos(a0) * r, cy + Math.sin(a0) * r, cx + Math.cos(a1) * r, cy + Math.sin(a1) * r); // corda
+  } else if (kind === 3) { // martelo
+    line(2.8, 0x1b1b1b, 0, 6, 0, -14); line(1.7, 0x9a6a38, 0, 6, 0, -14);
+    g.fillStyle(0x1b1b1b, 1).fillRect(-6.8, -21.5, 13.6, 9.4);
+    g.fillStyle(0x8e98a4, 1).fillRect(-6, -20.7, 12, 7.8);
+    g.fillStyle(0xdfe8f2, 1).fillRect(-6, -20.7, 12, 2.2);
+  } else { // garras: três lâminas curvas presas a uma luva
+    for (const ox of [-3.2, 0, 3.2]) {
+      line(2.6, 0x1b1b1b, ox, 0, ox * 1.7, -13);
+      line(1.4, 0xe8eef5, ox, -0.5, ox * 1.7, -12.4);
+    }
+    line(3.6, 0x1b1b1b, -4.6, 1, 4.6, 1); line(2.4, 0x7a3b1c, -4.2, 1, 4.2, 1);
+  }
+}
+
 // Boneco animado no Phaser: contêiner (vira para o lado) > peças com pivô nas articulações
 function createDoll(scene, config) {
   const cfg = parseDoll(config);
@@ -828,6 +862,21 @@ function createDoll(scene, config) {
   }
   const doll = scene.add.container(0, 0, [rig]).setScale(CHAR_SCALE);
   let phase = 0, dir = 1;
+
+  // Arma na mão (desenhada por código): o suporte gira junto com o braço da frente; a arma fica na ponta do braço
+  const hand = scene.add.container(part.armNear.x, part.armNear.y).setVisible(false);
+  const weaponG = scene.add.graphics().setPosition(0, 15);
+  hand.add(weaponG);
+  rig.add(hand);
+  let weaponKind = null, swing = 0;
+  doll.setWeapon = kind => {
+    if (kind === weaponKind) return;
+    weaponKind = kind;
+    weaponG.clear();
+    hand.setVisible(kind !== null && kind !== undefined);
+    if (kind !== null && kind !== undefined) drawWeapon(weaponG, kind);
+  };
+  doll.swingWeapon = () => { swing = 1; }; // o braço dá a "golpeada" na próxima animação
 
   doll.animate = (moving, air, vx, dt = 16, dancing = false) => {
     if (Math.abs(vx) > 0.5) dir = vx > 0 ? 1 : -1;
@@ -851,9 +900,14 @@ function createDoll(scene, config) {
     } else {
       bob = Math.sin(scene.time.now * 0.004) * 0.4;
     }
+    if (swing > 0) { // golpe: o braço levanta e desce rápido
+      aN = -2.0 + (1 - swing) * 1.8;
+      swing = Math.max(0, swing - dt / 260);
+    }
     const k = 1 - Math.exp(-dt * 0.02); // suaviza a transição entre poses
     const ease = (obj, target) => { obj.rotation += (target - obj.rotation) * k; };
     ease(part.armNear, aN); ease(part.armFar, aF);
+    if (weaponKind !== null) { hand.rotation = part.armNear.rotation; weaponG.rotation = WEAPON_TILT[weaponKind] ?? 0.7; }
     ease(part.legNear, lN); ease(part.legFar, lF);
     rig.y += (bob - rig.y) * k;
     rig.rotation += (sway - rig.rotation) * k;
@@ -2168,6 +2222,18 @@ const isHere = id => id === myId() || remotePlayers[id]?.map === currentMap;
 const arenaMeAlive = () => arenaById[myId()]?.alive !== false;
 
 // quem está em outro mapa não aparece (corpo, nome, GIF e balão)
+// Coloca na mão de cada boneco a arma escolhida (só nos mapas de combate)
+function updateHeldWeapons() {
+  const set = (id, sprite) => {
+    if (!sprite || !sprite.setWeapon) return; // só bonecos têm braço (imagens e GIFs não)
+    const st = arenaById[id];
+    const kind = isCombat() && isHere(id) && st && st.map === currentMap ? (id === myId() ? myWeapon : st.weapon) : null;
+    sprite.setWeapon(kind);
+  };
+  set(myId(), localSprite);
+  for (const id in remotePlayers) set(id, remotePlayers[id].rect);
+}
+
 function syncVisibility(id) {
   const r = remotePlayers[id];
   if (!r) return;
@@ -2369,8 +2435,8 @@ function drawArenaBars() {
   barsGfx.clear();
   if (!isCombat()) return;
   for (const sl of Object.values(slimes)) { // vida dos slimes feridos
-    if (sl.hp >= sl.max || !sl.c.visible) continue;
-    const w = 34, h = 5, x = sl.c.x - w / 2, y = sl.c.y - 46, pct = Phaser.Math.Clamp(sl.hp / sl.max, 0, 1);
+    if (sl.hp >= sl.max || !sl.c.visible || sl.dead) continue;
+    const m = sl.mult || 1, w = 34 + 8 * m, h = 5, x = sl.c.x - w / 2, y = sl.c.y - 32 * m - 6, pct = Phaser.Math.Clamp(sl.hp / sl.max, 0, 1);
     barsGfx.fillStyle(0x000000, 0.7).fillRect(x - 1, y - 1, w + 2, h + 2);
     barsGfx.fillStyle(0xe74c3c, 1).fillRect(x, y, w * pct, h);
   }
@@ -2486,7 +2552,10 @@ function setupArenaEvents() {
     updateArenaHud();
   });
 
-  connection.on('ArenaSwing', (id, weapon, dir) => swingFx(id, weapon, dir));
+  connection.on('ArenaSwing', (id, weapon, dir) => {
+    swingFx(id, weapon, dir);
+    (id === myId() ? localSprite : remotePlayers[id]?.rect)?.swingWeapon?.(); // o boneco dá a golpeada com a arma na mão
+  });
   connection.on('ArrowFired', (arrowId, owner, x, y, dir) => { if (isCombat() && isHere(owner)) spawnArrow(arrowId, x, y, dir); });
   connection.on('SlimeState', list => syncSlimes(list));
 
@@ -2494,7 +2563,7 @@ function setupArenaEvents() {
     if (arrowId && arrows[arrowId]) { arrows[arrowId].g.destroy(); delete arrows[arrowId]; }
     if (victimId.startsWith('slime:')) { // um slime apanhou
       const sl = slimes[victimId];
-      if (sl && currentMap === 'forest') { sl.hp = hp; sl.flash = 6; hitFx(sl.c.x, sl.c.y, dmg); sfxHurt(false); }
+      if (sl && currentMap === 'forest') { sl.hp = hp; sl.flash = 6; hitFx(sl.c.x, sl.c.y - 14 * (sl.mult || 1), dmg); sfxHurt(false); }
       return;
     }
     if (!isHere(victimId)) return;
@@ -2513,11 +2582,11 @@ function setupArenaEvents() {
     }
   });
 
-  connection.on('ArenaKill', (killerId, victimId) => {
+  connection.on('ArenaKill', (killerId, victimId, lvl) => {
     if (victimId.startsWith('slime:')) { // um slime foi derrotado
       const sl = slimes[victimId];
-      if (sl && currentMap === 'forest') { deathFx(sl.c.x, sl.c.y, 0x4cd137); chip([660, 880, 1320, 1760], 0.04, 'square', 0.1); sl.c.setVisible(false); sl.dead = true; }
-      if (killerId === myId()) addChatLine(null, '🟢 Você derrotou um slime! (+5 pontos)', true);
+      if (sl && currentMap === 'forest') { deathFx(sl.c.x, sl.c.y - 14 * (sl.mult || 1), SLIME_COLORS[Math.min(sl.lvl, 4)][1]); chip([660, 880, 1320, 1760], 0.04, 'square', 0.1); sl.c.setVisible(false); sl.dead = true; }
+      if (killerId === myId()) addChatLine(null, lvl > 0 ? `🟢 Você derrotou um slime gigante (${[1, 2, 4, 8, 10][lvl]}x)! +${5 * [1, 2, 4, 8, 10][lvl]} pontos` : '🟢 Você derrotou um slime! (+5 pontos)', true);
       return;
     }
     if (!isHere(victimId)) return;
@@ -2550,7 +2619,7 @@ Object.assign(HELP, {
   floresta: [
     '🌲 Floresta: ande até o fim da rua, à esquerda (onde está a placa), e segure ← por um instante. Tem música heroica e slimes 🟢 para derrotar.',
     'Lá você tem vida (100), escolhe a arma com as teclas 1 a 5 e ataca com Espaço ou X, como na arena — mas os jogadores NÃO se machucam entre si, só os slimes. Slime derrotado dá +5 pontos e volta depois de um tempo.',
-    'Cuidado: encostar num slime tira vida. Se a vida acabar, você volta para a cidade principal depois de 3 segundos. Para voltar ao vilarejo, ande até o fim da floresta, à direita, e segure →. Dá para cumprimentar, dançar e subir nas costas de amigos lá também.',
+    'Cuidado: cada jogador que um slime derrota faz ele dobrar de tamanho, vida e dano (até 10x) e mudar de cor — verde, azul, amarelo, laranja e roxo. Derrotar um slime grande vale mais pontos (5 × o tamanho). Encostar num slime tira vida. Se a vida acabar, você volta para a cidade principal depois de 3 segundos. Para voltar ao vilarejo, ande até o fim da floresta, à direita, e segure →. Dá para cumprimentar, dançar e subir nas costas de amigos lá também.',
   ],
   dash: [
     '💨 Dash: toque duas vezes rápido na seta ← ou → para dar um pequeno impulso. Vale também no ar! Depois há uma pequena pausa antes de usar de novo.',
@@ -2576,18 +2645,42 @@ function refreshHelpForMap() {
 
 // ======================= Slimes da floresta =======================
 // O servidor move e ataca os slimes (SlimeState a cada ~100 ms); aqui eles só são desenhados e suavizados.
-const slimes = {}; // id -> { c (contêiner), x, y (alvo), hp, max, dir, hop, flash }
+// Cada jogador que um slime derrota dobra o tamanho dele (1x, 2x, 4x, 8x e no máximo 10x) e muda a cor.
+const slimes = {}; // id -> { c (contêiner), g (desenho), x, y (alvo), hp, max, dir, hop, lvl, mult, flash }
+const SLIME_COLORS = [ // [contorno, corpo, brilho] por nível
+  [0x2f9e2a, 0x56d64a, 0xc9f7b5], // 1x verde
+  [0x1f7fa0, 0x3fc1e0, 0xc8f1fb], // 2x azul-ciano
+  [0xa8860f, 0xf1d54a, 0xfff5b8], // 4x amarelo
+  [0xa5410e, 0xf08a2e, 0xffd9b0], // 8x laranja
+  [0x6e1a6b, 0xb04de0, 0xf0c8ff], // 10x roxo (máximo)
+];
 
-function makeSlimeSprite(scene) {
-  const g = scene.add.graphics();
+function drawSlime(g, lvl) {
+  const [edge, body, shine] = SLIME_COLORS[Math.min(lvl || 0, SLIME_COLORS.length - 1)];
+  g.clear();
   g.fillStyle(0x000000, 0.25).fillEllipse(0, 0, 38, 8); // sombra no chão
-  g.fillStyle(0x2f9e2a, 1).fillEllipse(0, -13, 40, 28); // contorno escuro
-  g.fillStyle(0x56d64a, 1).fillEllipse(0, -13, 36, 25); // corpo
-  g.fillStyle(0xc9f7b5, 0.9).fillEllipse(-8, -20, 10, 6); // brilho
-  g.fillStyle(0xffffff, 1).fillEllipse(-7, -13, 9, 11).fillEllipse(7, -13, 9, 11); // olhos
-  g.fillStyle(0x16310f, 1).fillEllipse(-6, -12, 4, 6).fillEllipse(8, -12, 4, 6); // pupilas
-  g.lineStyle(2, 0x16310f, 1).beginPath().arc(0, -7, 5, 0.2, Math.PI - 0.2).strokePath(); // sorriso
-  return scene.add.container(0, 0, [g]).setDepth(0.5);
+  g.fillStyle(edge, 1).fillEllipse(0, -13, 40, 28); // contorno
+  g.fillStyle(body, 1).fillEllipse(0, -13, 36, 25); // corpo
+  g.fillStyle(shine, 0.9).fillEllipse(-8, -20, 10, 6); // brilho
+  g.fillStyle(shine, 0.55).fillEllipse(9, -8, 6, 4); // segundo brilho (slimes são só uma gosma: sem olhos nem boca)
+  if (lvl >= 4) g.fillStyle(0xffe066, 1).fillTriangle(-9, -26, -5, -34, -1, -26).fillTriangle(-1, -26, 3, -35, 7, -26).fillTriangle(7, -26, 10, -33, 13, -26); // coroa do slime máximo
+}
+
+function makeSlimeSprite(scene, lvl) {
+  const g = scene.add.graphics();
+  drawSlime(g, lvl);
+  return { c: scene.add.container(0, 0, [g]).setDepth(0.5), g };
+}
+
+function evolveFx(sl) { // estouro de partículas na cor nova e um som que sobe
+  const color = SLIME_COLORS[Math.min(sl.lvl, SLIME_COLORS.length - 1)][1], cx = sl.c.x, cy = sl.c.y - 14 * sl.mult;
+  for (let i = 0; i < 22; i++) {
+    const a = Math.random() * Math.PI * 2, d = (30 + Math.random() * 40) * Math.sqrt(sl.mult);
+    const p = gameScene.add.circle(cx, cy, 3 + Math.random() * 3, i % 3 ? color : 0xffffff).setDepth(8);
+    gameScene.tweens.add({ targets: p, x: cx + Math.cos(a) * d, y: cy + Math.sin(a) * d, alpha: 0, duration: 650, onComplete: () => p.destroy() });
+  }
+  chip([262, 330, 392, 523, 659, 784], 0.05, 'square', 0.12);
+  sl.pop = 10;
 }
 
 function syncSlimes(list) {
@@ -2597,11 +2690,15 @@ function syncSlimes(list) {
     let sl = slimes[d.id];
     if (!sl) {
       if (!gameScene) continue;
-      sl = slimes[d.id] = { c: makeSlimeSprite(gameScene), hp: d.hp, max: d.max, flash: 0, dead: false };
-      sl.c.setPosition(d.x, d.y + 13);
+      const made = makeSlimeSprite(gameScene, d.lvl);
+      sl = slimes[d.id] = { ...made, hp: d.hp, max: d.max, flash: 0, dead: false, lvl: d.lvl, mult: d.mult, pop: 0 };
+      sl.c.setPosition(d.x, d.y + 14 * d.mult);
     }
-    if (sl.dead) { sl.dead = false; sl.c.setPosition(d.x, d.y + 13); } // voltou a viver
-    Object.assign(sl, { x: d.x, y: d.y, hp: d.hp, max: d.max, dir: d.dir, hop: d.hop });
+    if (sl.dead) { sl.dead = false; sl.c.setPosition(d.x, d.y + 14 * d.mult); } // voltou a viver
+    const evolved = d.lvl > sl.lvl, reset = d.lvl < sl.lvl;
+    Object.assign(sl, { x: d.x, y: d.y, hp: d.hp, max: d.max, dir: d.dir, hop: d.hop, lvl: d.lvl, mult: d.mult });
+    if (evolved || reset) drawSlime(sl.g, sl.lvl);
+    if (evolved && currentMap === 'forest') evolveFx(sl);
   }
   for (const id in slimes) if (!seen.has(id)) { slimes[id].c.destroy(); delete slimes[id]; }
 }
@@ -2612,11 +2709,14 @@ function updateSlimes() {
   for (const sl of Object.values(slimes)) {
     sl.c.setVisible(forest && !sl.dead);
     if (!forest || sl.dead) continue;
+    const m = sl.mult || 1;
     sl.c.x += (sl.x - sl.c.x) * 0.4;
-    sl.c.y += (sl.y + 13 - sl.c.y) * 0.5;
+    sl.c.y += (sl.y + 14 * m - sl.c.y) * 0.5;
     const hopping = sl.hop > 1; // no ar: esticado; no chão: respira
-    sl.c.scaleX = (hopping ? 0.88 : 1 + Math.sin(now / 220) * 0.04) * (sl.dir || 1);
-    sl.c.scaleY = hopping ? 1.14 : 1 - Math.sin(now / 220) * 0.04;
+    const pop = sl.pop > 0 ? 1 + sl.pop * 0.03 : 1; // "pulinho" de tamanho ao evoluir
+    if (sl.pop > 0) sl.pop--;
+    sl.c.scaleX = (hopping ? 0.88 : 1 + Math.sin(now / 220) * 0.04) * (sl.dir || 1) * m * pop;
+    sl.c.scaleY = (hopping ? 1.14 : 1 - Math.sin(now / 220) * 0.04) * m * pop;
     if (sl.flash > 0) { sl.flash--; sl.c.setAlpha(sl.flash % 2 ? 0.45 : 1); } else sl.c.setAlpha(1);
   }
 }

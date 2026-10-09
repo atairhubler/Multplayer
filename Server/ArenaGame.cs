@@ -12,9 +12,12 @@ public static class ArenaGame
     private const float ArrowSpeed = 600, ArrowRange = 650, ArrowHitX = 26, ArrowHitY = 50; // px/s e px
 
     // Slimes da floresta
-    private const int SlimeCount = 5, SlimeHp = 30, SlimeKillPoints = 5, SlimeRespawnMs = 6000, SlimeContactDamage = 6, SlimeContactImmuneMs = 1500;
+    private const int SlimeCount = 5, SlimeHp = 30, SlimeKillPoints = 5, SlimeRespawnMs = 6000, SlimeContactDamage = 18, SlimeContactImmuneMs = 1500;
     private const float SlimeSpeed = 95, SlimeGroundY = 580, SlimeMinX = 150, SlimeMaxX = 1150, SlimeSight = 380, SlimeHopMax = 26;
     private const double SlimeHopSeconds = 1.0, SlimeAirFraction = 0.4;
+    // Evolução: cada jogador que o slime derrota dobra o tamanho, a vida e o dano dele, até 10x o de um slime normal (1x, 2x, 4x, 8x, 10x)
+    private static readonly float[] SlimeMults = { 1, 2, 4, 8, 10 };
+    private const float SlimeHalfW = 20, SlimeHalfH = 14; // meio corpo de um slime normal (px)
     public const string ForestGroup = "forest";
 
     // Mesma ordem do cliente: Espada, Lança, Arco, Martelo, Garras
@@ -30,7 +33,8 @@ public static class ArenaGame
 
     private class State { public int Hp = MaxHp, Weapon, Score; public long LastAttackAt, ImmuneUntil, RespawnAt; public bool Alive = true; public string Map = MapName; }
     private class Arrow { public int Id; public string Owner = "", Map = MapName; public float X, Y, Dir, Traveled; }
-    private class Slime { public int Id; public float X, Hop; public int Hp = SlimeHp, Dir = 1; public double Phase; public long NextTurnAt, RespawnAt; public bool Alive; }
+    private class Slime { public int Id, Level, MaxHp = SlimeHp; public float X, Hop, Mult = 1; public int Hp = SlimeHp, Dir = 1; public double Phase; public long NextTurnAt, RespawnAt; public bool Alive; }
+    private static float SlimeCenterY(Slime s) => 594 - SlimeHalfH * s.Mult - s.Hop; // y do centro do corpo (o chão fica em 594)
 
     private static readonly object Gate = new();
     private static readonly Dictionary<string, State> InCombat = new();
@@ -61,7 +65,7 @@ public static class ArenaGame
 
     // Slimes vivos (posição do centro; y já inclui o pulo)
     private static object SlimeSnapshot() => Slimes.Where(s => s.Alive)
-        .Select(s => new { id = "slime:" + s.Id, x = s.X, y = SlimeGroundY - s.Hop, hp = s.Hp, max = SlimeHp, dir = s.Dir, hop = s.Hop })
+        .Select(s => new { id = "slime:" + s.Id, x = s.X, y = SlimeCenterY(s), hp = s.Hp, max = s.MaxHp, dir = s.Dir, hop = s.Hop, lvl = s.Level, mult = s.Mult })
         .ToList();
 
     public static async Task Enter(IHubContext<GameHub> hub, string id, string map)
@@ -152,7 +156,7 @@ public static class ArenaGame
                 {
                     if (!sl.Alive) continue;
                     var dx = (sl.X - me.X) * dir;
-                    if (dx < -10 || dx > w.Range + HalfBody + 14 || Math.Abs(SlimeGroundY - sl.Hop - me.Y) > ReachY + 10) continue;
+                    if (dx < -10 || dx > w.Range + HalfBody + SlimeHalfW * sl.Mult || Math.Abs(SlimeCenterY(sl) - me.Y) > ReachY + 10 + SlimeHalfH * sl.Mult) continue;
                     HitSlime(me.Id, st, sl, w, dir, 0, now, events);
                     stateChanged = true;
                 }
@@ -176,6 +180,21 @@ public static class ArenaGame
         events.Add(("ArenaKill", new object?[] { attackerId, victimId }));
     }
 
+    // O slime derrotou um jogador: dobra tamanho, vida e dano (até 10x) e muda de cor (nível novo no cliente)
+    private static void EvolveSlime(Slime sl, string victimName, List<(string, object?[])> events)
+    {
+        if (sl.Level >= SlimeMults.Length - 1) return;
+        var old = sl.Mult;
+        sl.Level++;
+        sl.Mult = SlimeMults[sl.Level];
+        sl.MaxHp = (int)(SlimeHp * sl.Mult);
+        sl.Hp = Math.Min(sl.MaxHp, (int)Math.Round(sl.Hp * (sl.Mult / old)));
+        var msg = sl.Level == SlimeMults.Length - 1
+            ? $"👑 Um slime derrotou {victimName} e chegou ao tamanho máximo ({sl.Mult:0}x)! Cuidado!"
+            : $"🟢 Um slime derrotou {victimName} e evoluiu para {sl.Mult:0}x!";
+        events.Add(("SystemMessage", new object?[] { msg }));
+    }
+
     // Aplica o dano em um slime (dentro do lock)
     private static void HitSlime(string attackerId, State attacker, Slime sl, Weapon w, int dir, int arrowId, long now, List<(string, object?[])> events)
     {
@@ -188,8 +207,8 @@ public static class ArenaGame
         {
             sl.Alive = false;
             sl.RespawnAt = now + SlimeRespawnMs;
-            attacker.Score += SlimeKillPoints;
-            events.Add(("ArenaKill", new object?[] { attackerId, slimeId }));
+            attacker.Score += (int)(SlimeKillPoints * sl.Mult); // slime evoluído vale mais
+            events.Add(("ArenaKill", new object?[] { attackerId, slimeId, sl.Level }));
         }
         Scores[attackerId] = attacker.Score;
     }
@@ -211,7 +230,8 @@ public static class ArenaGame
             bool changed = false;
             lock (Gate)
             {
-                if (InCombat.Count == 0) { _loopRunning = false; Arrows.Clear(); Slimes.Clear(); return; }
+                // sem ninguém em combate o laço para; os slimes (e a evolução deles) ficam guardados para quando alguém voltar à floresta
+                if (InCombat.Count == 0) { _loopRunning = false; Arrows.Clear(); return; }
 
                 // jogadores caídos voltam
                 foreach (var (id, st) in InCombat)
@@ -228,7 +248,7 @@ public static class ArenaGame
                     Arrows.RemoveAll(a => a.Owner == id);
                     if (GameHub.Players.TryGetValue(id, out var home)) { home.Map = "village"; home.X = VillageHomeX; home.Y = SpawnY; }
                 }
-                if (InCombat.Count == 0) { _loopRunning = false; Arrows.Clear(); Slimes.Clear(); }
+                if (InCombat.Count == 0) { _loopRunning = false; Arrows.Clear(); }
 
                 // flechas
                 for (var i = Arrows.Count - 1; i >= 0; i--)
@@ -254,7 +274,7 @@ public static class ArenaGame
                         {
                             foreach (var sl in Slimes)
                             {
-                                if (!sl.Alive || Math.Abs(sl.X - a.X) > ArrowHitX + 10 || Math.Abs(SlimeGroundY - sl.Hop - a.Y) > ArrowHitY) continue;
+                                if (!sl.Alive || Math.Abs(sl.X - a.X) > ArrowHitX + 10 + SlimeHalfW * sl.Mult || Math.Abs(SlimeCenterY(sl) - a.Y) > ArrowHitY + SlimeHalfH * sl.Mult) continue;
                                 HitSlime(a.Owner, owner, sl, Weapons[2], (int)a.Dir, a.Id, now, events);
                                 hit = true; changed = true;
                                 break;
@@ -272,7 +292,7 @@ public static class ArenaGame
                     {
                         if (!sl.Alive)
                         {
-                            if (now >= sl.RespawnAt) { var n = NewSlime(sl.Id); sl.Alive = true; sl.Hp = n.Hp; sl.X = n.X; sl.Dir = n.Dir; sl.Phase = 0; sl.Hop = 0; }
+                            if (now >= sl.RespawnAt) { var n = NewSlime(sl.Id); sl.Alive = true; sl.Hp = n.Hp; sl.MaxHp = SlimeHp; sl.Level = 0; sl.Mult = 1; sl.X = n.X; sl.Dir = n.Dir; sl.Phase = 0; sl.Hop = 0; }
                             continue;
                         }
                         var prevPhase = sl.Phase;
@@ -290,26 +310,29 @@ public static class ArenaGame
                         if (sl.Phase < SlimeAirFraction)
                         {
                             sl.X += sl.Dir * SlimeSpeed * dt;
-                            sl.Hop = SlimeHopMax * (float)Math.Sin(Math.PI * sl.Phase / SlimeAirFraction);
+                            sl.Hop = SlimeHopMax * (float)Math.Sqrt(sl.Mult) * (float)Math.Sin(Math.PI * sl.Phase / SlimeAirFraction);
                         }
                         else sl.Hop = 0;
                         if (sl.X < SlimeMinX - 90) { sl.X = SlimeMinX - 90; sl.Dir = 1; }
                         if (sl.X > SlimeMaxX + 70) { sl.X = SlimeMaxX + 70; sl.Dir = -1; }
+                        var centerY = SlimeCenterY(sl);
 
                         // encostou em um jogador: dano e empurrão
                         foreach (var (pid, pst) in forest)
                         {
                             if (!pst.Alive || pst.ImmuneUntil > now || !GameHub.Players.TryGetValue(pid, out var p)) continue;
-                            if (Math.Abs(p.X - sl.X) > 34 || Math.Abs(p.Y - (SlimeGroundY - sl.Hop)) > 52) continue;
-                            pst.Hp = Math.Max(0, pst.Hp - SlimeContactDamage);
+                            if (Math.Abs(p.X - sl.X) > 22 + SlimeHalfW * sl.Mult * 0.85f || Math.Abs(p.Y - centerY) > 33 + SlimeHalfH * sl.Mult) continue;
+                            var dmg = (int)Math.Round(SlimeContactDamage * sl.Mult); // o dano cresce junto com o slime
+                            pst.Hp = Math.Max(0, pst.Hp - dmg);
                             pst.ImmuneUntil = now + SlimeContactImmuneMs;
                             var away = p.X >= sl.X ? 1 : -1;
-                            events.Add(("ArenaHit", new object?[] { "slime:" + sl.Id, pid, SlimeContactDamage, pst.Hp, away, 260f, 140f, 0 }));
+                            events.Add(("ArenaHit", new object?[] { "slime:" + sl.Id, pid, dmg, pst.Hp, away, 260f + 40f * sl.Mult, 140f, 0 }));
                             changed = true;
                             if (pst.Hp <= 0)
                             {
                                 pst.Alive = false; pst.RespawnAt = now + RespawnMs;
-                                events.Add(("ArenaKill", new object?[] { "slime:" + sl.Id, pid }));
+                                events.Add(("ArenaKill", new object?[] { "slime:" + sl.Id, pid, sl.Level }));
+                                EvolveSlime(sl, GameHub.Players[pid].Name, events); // matou um jogador: evolui
                             }
                         }
                     }
@@ -317,7 +340,11 @@ public static class ArenaGame
                 }
             }
 
-            foreach (var (m, a) in events) await Send(hub, m, a);
+            foreach (var (m, a) in events)
+            {
+                if (m == "SystemMessage") await hub.Clients.Group(ForestGroup).SendAsync(m, a[0]);
+                else await Send(hub, m, a);
+            }
             foreach (var id in sentHome)
             {
                 await hub.Groups.RemoveFromGroupAsync(id, ForestGroup);
