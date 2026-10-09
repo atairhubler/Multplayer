@@ -9,3 +9,10 @@ services:
     envVars:
       - key: ALLOWED_ORIGINS
         sync: false   # defina no painel: https://SEU-USUARIO.github.io
+      # Opcionais: servidor TURN próprio para voz/tela (ex.: conta gratuita na Metered). Sem eles usa o relay público.
+      - key: TURN_URLS
+        sync: false   # ex.: turn:SEU.metered.live:80,turn:SEU.metered.live:443?transport=tcp
+      - key: TURN_USERNAME
+        sync: false
+      - key: TURN_CREDENTIAL
+        sync: false

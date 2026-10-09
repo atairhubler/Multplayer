@@ -232,7 +232,6 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
         me.X = bas.X;
         me.Y = bas.Y;
         me.RidingOn = carrier.Id;
-        if (me.Dancing) { me.Dancing = false; await Clients.Group(Room).SendAsync("PlayerDance", me.Id, false); }
         await Clients.Group(Room).SendAsync("Riding", me.Id, carrier.Id, bas.X, bas.Y);
         await Clients.Client(carrier.Id).SendAsync("SystemMessage", $"🐴 {me.Name} subiu nas suas costas! Aperte R para derrubar.");
     }
@@ -271,7 +270,6 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
     public async Task SetDancing(bool on)
     {
         if (!Players.TryGetValue(Context.ConnectionId, out var me) || me.Dancing == on) return;
-        if (on && me.RidingOn is not null) return;
         me.Dancing = on;
 
         if (on)

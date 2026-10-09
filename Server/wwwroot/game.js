@@ -439,7 +439,7 @@ function update(time, delta) {
 
   if (carrier) {
     localSprite.setPosition(player.x, player.y - CHAR_H * 0.72);
-    localSprite.animate?.(false, false, 0, delta, false);
+    localSprite.animate?.(false, false, 0, delta, localDancing);
   } else {
     localSprite.setPosition(player.x, player.y);
     const vx = body.velocity.x;
@@ -468,7 +468,7 @@ function update(time, delta) {
     if (cId && src) {
       r.rect.setPosition(src.x, src.y - RIDE_STEP);
       r.targetX = src.x; r.targetY = src.y;
-      r.rect.animate?.(false, false, 0, delta, false);
+      r.rect.animate?.(false, false, 0, delta, r.dancing);
     } else {
       const dx = r.targetX - r.rect.x, dy = r.targetY - r.rect.y;
       r.rect.x = Phaser.Math.Linear(r.rect.x, r.targetX, 0.25);
@@ -1074,7 +1074,7 @@ const doGreet = () => connection.invoke('Greet');
 const doPush = () => connection.invoke('Push');
 const doRide = () => connection.invoke('ToggleRide');
 const setDancing = on => { localDancing = on; connection.invoke('SetDancing', on); };
-const doDance = () => { if (!ridingMap[myId()]) setDancing(!localDancing); };
+const doDance = () => setDancing(!localDancing); // também vale nas costas de alguém (torre)
 const doInteract = () => {
   if (currentShareTarget) return interactShare(currentShareTarget);
   if (currentSpot >= 0) connection.invoke('Interact', currentSpot);
@@ -1089,7 +1089,7 @@ function onRiding(rid, cid, x, y) {
   const sprite = me ? localSprite : remotePlayers[rid]?.rect;
   sprite?.setDepth(cid ? 2 : 0);
   if (me) {
-    if (cid) { player.body.enable = false; player.body.setVelocity(0, 0); localDancing = false; }
+    if (cid) { player.body.enable = false; player.body.setVelocity(0, 0); }
     else { player.body.enable = true; player.body.reset(x, y); }
   } else if (!cid && remotePlayers[rid]) {
     Object.assign(remotePlayers[rid], { targetX: x, targetY: y });
@@ -1180,6 +1180,7 @@ const HELP = {
   ],
   danca: [
     '💃 Dança: aperte G para começar a dançar (celular: botão 😀 e depois 💃). Aperte G de novo ou ande para parar.',
+    'Também dá para dançar em cima de um amigo, na torre!',
     'Quando vários amigos dançam juntos a dança fica sincronizada! Dançar por 90 segundos dá o título "Dançarino".',
   ],
   pique: [
@@ -1343,9 +1344,17 @@ window.addEventListener('keydown', e => {
 const VOICE_ICE_SERVERS = [
   { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] },
   // Redes que bloqueiam a conexão direta (ex.: dados móveis) precisam de um servidor TURN. Se algum amigo
-  // não conseguir ouvir/falar, acrescente aqui, por exemplo:
-  // { urls: 'turn:SEU_SERVIDOR:3478', username: 'usuario', credential: 'senha' },
+  // não conseguir ouvir/falar, o servidor entrega também um TURN em /ice-servers (veja abaixo).
 ];
+// Lista de servidores ICE vinda do servidor (STUN + TURN). Se o servidor for antigo ou não responder em 3 s, usa só o STUN.
+let ICE_SERVERS = VOICE_ICE_SERVERS;
+const iceReady = (async () => {
+  try {
+    const r = await fetch(SERVER_URL + '/ice-servers', { signal: AbortSignal.timeout(3000), cache: 'no-store' });
+    const list = r.ok ? await r.json() : null;
+    if (Array.isArray(list) && list.length) ICE_SERVERS = list;
+  } catch { /* fica com o STUN */ }
+})();
 const VOICE_NEAR = 450, VOICE_FAR = 1300, VOICE_MIN_VOLUME = 0.35; // volume por distância no mapa
 const SPEAKING_LEVEL = 0.02; // sensibilidade para mostrar 🎙️
 
@@ -1364,12 +1373,17 @@ const sendSignal = (id, obj) => connection.invoke('VoiceSignal', id, JSON.string
 
 function createPeer(id) {
   if (voice.peers[id]) return voice.peers[id];
-  const pc = new RTCPeerConnection({ iceServers: VOICE_ICE_SERVERS });
+  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
   // queue: os sinais de cada par são tratados um de cada vez (offer/answer/ICE chegam em sequência, mas o processamento é assíncrono)
   const peer = { pc, audio: null, pending: [], queue: Promise.resolve(), initiator: false, restarts: 0 };
   voice.peers[id] = peer;
   voice.stream.getTracks().forEach(t => pc.addTrack(t, voice.stream));
-  pc.onicecandidate = e => { if (e.candidate) sendSignal(id, { candidate: e.candidate }); };
+  peer.cands = { host: 0, srflx: 0, relay: 0 };
+  pc.onicecandidate = e => {
+    if (!e.candidate) return;
+    peer.cands[e.candidate.type] = (peer.cands[e.candidate.type] || 0) + 1;
+    sendSignal(id, { candidate: e.candidate });
+  };
   pc.ontrack = e => {
     if (peer.audio) return;
     const audio = document.createElement('audio');
@@ -1394,6 +1408,12 @@ function createPeer(id) {
       }
     }
   };
+  // sem conexão em 12 s: avisa no chat (e mostra no console quais tipos de candidato existiram: host/srflx/relay)
+  setTimeout(() => {
+    if (voice.peers[id] !== peer || pc.connectionState === 'connected') return;
+    console.warn(`[voz] sem conexão com ${remotePlayers[id]?.name || id} após 12 s. Candidatos locais:`, peer.cands, 'ICE:', pc.iceConnectionState);
+    say([`⚠️ Ainda sem voz com ${remotePlayers[id]?.name || 'um amigo'}. A rede de alguém pode estar bloqueando conexões diretas.`]);
+  }, 12000);
   // se o par não conectar em 15 s (sinal perdido), recomeça a ligação uma vez
   setTimeout(() => {
     if (voice.peers[id] === peer && pc.connectionState !== 'connected' && peer.restarts < 1) restartPeer(id);
@@ -1493,6 +1513,7 @@ async function joinVoice() {
   if (!navigator.mediaDevices?.getUserMedia || !window.RTCPeerConnection) {
     return say(['Seu navegador não suporta chat de voz.']);
   }
+  await iceReady; // servidores STUN/TURN (no máx. 3 s)
   try {
     voice.stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false,
@@ -1698,7 +1719,7 @@ async function handleShareSignal(from, payload) {
 async function answerViewer(from, msg) {
   let v = share.viewers[from];
   if (!v) {
-    const pc = new RTCPeerConnection({ iceServers: VOICE_ICE_SERVERS });
+    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     v = share.viewers[from] = { pc, pending: [] };
     pc.onicecandidate = e => { if (e.candidate) sendShareSignal(from, { candidate: e.candidate }); };
     pc.onconnectionstatechange = () => {
@@ -1732,8 +1753,9 @@ async function answerViewer(from, msg) {
 async function startWatching(id) {
   if (share.views[id] || id === myId()) return;
   await projReady;
+  await iceReady;
   if (share.views[id]) return;
-  const pc = new RTCPeerConnection({ iceServers: VOICE_ICE_SERVERS });
+  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
   const view = share.views[id] = { pc, pending: [] };
   pc.addTransceiver('video', { direction: 'recvonly' });
   pc.addTransceiver('audio', { direction: 'recvonly' });

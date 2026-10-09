@@ -21,6 +21,33 @@ app.UseStaticFiles(); // serve o cliente em wwwroot (uso local)
 
 app.MapGet("/health", () => "ok"); // para ping de keep-alive
 
+// Servidores ICE para voz/tela (WebRTC). STUN descobre o endereço público; TURN retransmite quando duas redes
+// restritivas (dados móveis, CGNAT) não conseguem falar direto. Credenciais próprias: TURN_URLS (separadas por
+// vírgula), TURN_USERNAME e TURN_CREDENTIAL no Render. Sem elas, usa o relay público gratuito da Metered (Open Relay).
+app.MapGet("/ice-servers", (HttpContext ctx) =>
+{
+    var turnUrls = (Environment.GetEnvironmentVariable("TURN_URLS") ?? "")
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    var user = Environment.GetEnvironmentVariable("TURN_USERNAME");
+    var cred = Environment.GetEnvironmentVariable("TURN_CREDENTIAL");
+    var servers = new List<object> { new { urls = new[] { "stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302" } } };
+    if (turnUrls.Length > 0 && !string.IsNullOrEmpty(user) && !string.IsNullOrEmpty(cred))
+        servers.Add(new { urls = turnUrls, username = user, credential = cred });
+    else
+        servers.Add(new
+        {
+            urls = new[]
+            {
+                "turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443",
+                "turn:openrelay.metered.ca:443?transport=tcp", "turns:openrelay.metered.ca:443?transport=tcp",
+            },
+            username = "openrelayproject",
+            credential = "openrelayproject",
+        });
+    ctx.Response.Headers["Cache-Control"] = "no-store";
+    return Results.Ok(servers);
+});
+
 // Upload de avatar (GIF animado): corpo = bytes do arquivo; devolve a URL relativa
 app.MapPost("/avatars", async (HttpRequest req) =>
 {
