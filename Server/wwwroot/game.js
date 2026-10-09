@@ -246,7 +246,7 @@ function refreshLabel(id) {
   const info = id === myId() ? localInfo : remotePlayers[id];
   if (!info || !info.label) return;
   const it = isIt(id);
-  info.label.setText((it ? '🔴 ' : '') + (info.title ? info.title + '\n' : '') + info.name);
+  info.label.setText((it ? '🔴 ' : '') + (info.speaking ? '🎙️ ' : '') + (info.title ? info.title + '\n' : '') + info.name);
   info.label.setColor(it ? '#ff6b6b' : info.nameColor || '#ffffff');
 }
 const refreshAllLabels = () => { refreshLabel(myId()); Object.keys(remotePlayers).forEach(refreshLabel); };
@@ -382,6 +382,8 @@ function create() {
     r.label.destroy();
     delete remotePlayers[id];
     delete ridingMap[id];
+    voice.members.delete(id);
+    closePeer(id);
     renderOnline();
   });
 
@@ -524,6 +526,7 @@ function setupChat() {
   renderOnline();
   connection.on('ChatHistory', list => list.forEach(m => addChatLine(m.name, m.text)));
   connection.on('ChatMessage', m => { addChatLine(m.name, m.text); showBubble(m.id, m.text); });
+  setupVoiceEvents();
   chatReady = true;
   // depois do histórico, que chega logo ao entrar
   setTimeout(() => addChatLine(null, `👋 Bem-vindo, ${myName}! Digite /comandos para ver tudo que você pode fazer.`), 700);
@@ -750,7 +753,8 @@ drawDollPreview(document.getElementById('dollPreview'), currentDollConfig());
 const onlineEl = document.getElementById('online');
 function renderOnline() {
   const list = document.getElementById('onlineList');
-  const names = [{ name: myName + ' (você)', me: true }, ...Object.values(remotePlayers).map(r => ({ name: r.name }))];
+  const names = [{ name: myName + ' (você)' + (voice.on ? ' 🎧' : ''), me: true },
+    ...Object.entries(remotePlayers).map(([id, r]) => ({ name: r.name + (voice.members.has(id) ? ' 🎧' : '') }))];
   list.replaceChildren(...names.map(n => {
     const li = document.createElement('li');
     li.textContent = n.name; // textContent: nomes nunca viram HTML
@@ -1010,6 +1014,11 @@ const HELP = {
     '🏘️ Vilarejo: ande até a fonte, as barracas, a padaria, a ferraria ou a porta da esquerda.',
     'Quando aparecer o aviso no topo da tela, aperte E (celular: toque no aviso) para interagir. Todos veem o que você fez.',
   ],
+  voz: [
+    '🎧 Chat de voz: clique em 🎧 (no painel de online, no canto superior direito) para entrar e falar com os amigos em tempo real.',
+    'Use 🎤 para mutar o microfone e 🎧 de novo para sair. Quem fala aparece com 🎙️ no nome, e o volume diminui com a distância.',
+    'Também funciona com /voz entrar, /voz sair e /voz mutar. Precisa de um navegador com permissão de microfone.',
+  ],
   titulo: null,
   cor: [
     '🎨 Cor do nome: digite /cor seguido de um código de cor, por exemplo /cor #ff8800. Você também escolhe na tela de entrada.',
@@ -1038,11 +1047,18 @@ function runCommand(text) {
       '/vilarejo — interagir com a fonte, barracas e porta',
       '/titulo — ver e escolher seus títulos',
       '/cor — mudar a cor do seu nome',
+      '/voz — chat de voz com microfone',
     ]);
   }
   if (cmd === 'emote' && /^[1-6]$/.test(args[0] || '')) return sendEmote(Number(args[0]) - 1);
   if (cmd === 'pique' && args[0]?.toLowerCase() === 'iniciar') return connection.invoke('StartTag');
   if (cmd === 'pique' && args[0]?.toLowerCase() === 'parar') return connection.invoke('StopTag');
+  if (cmd === 'voz' && args[0]) {
+    const a = args[0].toLowerCase();
+    if (a === 'entrar') return joinVoice();
+    if (a === 'sair') return leaveVoice();
+    if (a === 'mutar') return toggleMute();
+  }
   if (cmd === 'titulo') return titleCommand(args);
   if (cmd === 'cor' && args[0]) return colorCommand(args[0]);
   if (HELP[cmd]) return say(HELP[cmd]);
@@ -1089,3 +1105,173 @@ window.addEventListener('keydown', e => {
   b.addEventListener('click', () => { fn(); emoteTray.classList.remove('open'); });
   emoteTray.appendChild(b);
 });
+
+// ======================= Chat de voz (WebRTC, em malha) =======================
+// Cada pessoa na voz abre uma conexão de áudio direta com cada uma das outras.
+// O servidor só ajuda a "apresentar" os navegadores (mensagens offer/answer/ICE via SignalR).
+const VOICE_ICE_SERVERS = [
+  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] },
+  // Redes que bloqueiam a conexão direta (ex.: dados móveis) precisam de um servidor TURN. Se algum amigo
+  // não conseguir ouvir/falar, acrescente aqui, por exemplo:
+  // { urls: 'turn:SEU_SERVIDOR:3478', username: 'usuario', credential: 'senha' },
+];
+const VOICE_NEAR = 450, VOICE_FAR = 1300, VOICE_MIN_VOLUME = 0.35; // volume por distância no mapa
+const SPEAKING_LEVEL = 0.02; // sensibilidade para mostrar 🎙️
+
+const voice = { on: false, muted: false, stream: null, ctx: null, peers: {}, members: new Set(), levels: {} };
+const voiceBtn = document.getElementById('voiceBtn');
+const micBtn = document.getElementById('micBtn');
+
+function updateVoiceButtons() {
+  voiceBtn.textContent = voice.on ? '🎧✔' : '🎧';
+  micBtn.hidden = !voice.on;
+  micBtn.textContent = voice.muted ? '🎤✖' : '🎤';
+  renderOnline();
+}
+
+const sendSignal = (id, obj) => connection.invoke('VoiceSignal', id, JSON.stringify(obj)).catch(() => {});
+
+function createPeer(id) {
+  if (voice.peers[id]) return voice.peers[id];
+  const pc = new RTCPeerConnection({ iceServers: VOICE_ICE_SERVERS });
+  const peer = { pc, audio: null, pending: [] };
+  voice.peers[id] = peer;
+  voice.stream.getTracks().forEach(t => pc.addTrack(t, voice.stream));
+  pc.onicecandidate = e => { if (e.candidate) sendSignal(id, { candidate: e.candidate }); };
+  pc.ontrack = e => {
+    if (peer.audio) return;
+    const audio = document.createElement('audio');
+    audio.autoplay = true; audio.playsInline = true;
+    audio.srcObject = e.streams[0];
+    document.body.appendChild(audio);
+    audio.play().catch(() => {});
+    peer.audio = audio;
+    watchLevel(id, e.streams[0]);
+  };
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'failed' && voice.peers[id] === peer) {
+      const name = remotePlayers[id]?.name || 'um amigo';
+      say([`⚠️ Não consegui conectar a voz com ${name}. A rede dessa pessoa pode estar bloqueando conexões diretas (é comum em dados móveis).`]);
+      closePeer(id);
+    }
+  };
+  return peer;
+}
+
+function closePeer(id) {
+  const peer = voice.peers[id];
+  if (peer) { peer.pc.close(); peer.audio?.remove(); delete voice.peers[id]; }
+  stopWatching(id);
+}
+
+async function callPeer(id) { // quem acabou de entrar na voz inicia a conexão
+  const { pc } = createPeer(id);
+  await pc.setLocalDescription(await pc.createOffer());
+  sendSignal(id, { sdp: pc.localDescription });
+}
+
+async function handleVoiceSignal(from, payload) {
+  if (!voice.on) return;
+  let msg;
+  try { msg = JSON.parse(payload); } catch { return; }
+  try {
+    const peer = createPeer(from);
+    const { pc } = peer;
+    if (msg.sdp) {
+      await pc.setRemoteDescription(msg.sdp);
+      for (const c of peer.pending.splice(0)) await pc.addIceCandidate(c).catch(() => {});
+      if (msg.sdp.type === 'offer') {
+        await pc.setLocalDescription(await pc.createAnswer());
+        sendSignal(from, { sdp: pc.localDescription });
+      }
+    } else if (msg.candidate) {
+      if (pc.remoteDescription) await pc.addIceCandidate(msg.candidate).catch(() => {});
+      else peer.pending.push(msg.candidate); // chegou antes da oferta/resposta: guarda
+    }
+  } catch { /* mensagem inválida ou fora de ordem: ignora */ }
+}
+
+// ---- Quem está falando (🎙️) e volume por distância ----
+function watchLevel(id, stream) {
+  try {
+    const an = voice.ctx.createAnalyser();
+    an.fftSize = 512;
+    voice.ctx.createMediaStreamSource(stream).connect(an); // só mede; não toca de novo
+    voice.levels[id] = { an, data: new Uint8Array(an.fftSize) };
+  } catch {}
+}
+function stopWatching(id) {
+  delete voice.levels[id];
+  const info = id === myId() ? localInfo : remotePlayers[id];
+  if (info?.speaking) { info.speaking = false; refreshLabel(id); }
+}
+setInterval(() => {
+  for (const [id, lv] of Object.entries(voice.levels)) {
+    lv.an.getByteTimeDomainData(lv.data);
+    let sum = 0;
+    for (const v of lv.data) sum += ((v - 128) / 128) ** 2;
+    const speaking = Math.sqrt(sum / lv.data.length) > SPEAKING_LEVEL && !(id === myId() && voice.muted);
+    const info = id === myId() ? localInfo : remotePlayers[id];
+    if (info && info.speaking !== speaking) { info.speaking = speaking; refreshLabel(id); }
+  }
+  for (const [id, peer] of Object.entries(voice.peers)) { // quanto mais longe no mapa, mais baixo
+    const r = remotePlayers[id]?.rect;
+    if (!peer.audio || !r || typeof player === 'undefined') continue;
+    const d = Math.hypot(r.x - player.x, r.y - player.y);
+    peer.audio.volume = Math.max(VOICE_MIN_VOLUME, Math.min(1, 1 - (d - VOICE_NEAR) / (VOICE_FAR - VOICE_NEAR) * (1 - VOICE_MIN_VOLUME)));
+  }
+}, 120);
+
+// ---- Entrar, sair e mutar ----
+async function joinVoice() {
+  if (voice.on) return;
+  if (!navigator.mediaDevices?.getUserMedia || !window.RTCPeerConnection) {
+    return say(['Seu navegador não suporta chat de voz.']);
+  }
+  try {
+    voice.stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false,
+    });
+  } catch {
+    return say(['🎤 Não consegui acessar o microfone. Permita o acesso no navegador (ícone ao lado do endereço) e tente de novo.']);
+  }
+  voice.on = true;
+  voice.muted = false;
+  voice.ctx ||= new (window.AudioContext || window.webkitAudioContext)();
+  voice.ctx.resume();
+  watchLevel(myId(), voice.stream);
+  updateVoiceButtons();
+  say(['🎧 Você entrou no chat de voz. Use 🎤 para mutar e 🎧 para sair.']);
+  connection.invoke('JoinVoice');
+}
+
+function leaveVoice() {
+  if (!voice.on) return;
+  connection.invoke('LeaveVoice').catch(() => {});
+  Object.keys(voice.peers).forEach(closePeer);
+  voice.stream?.getTracks().forEach(t => t.stop());
+  stopWatching(myId());
+  voice.on = false; voice.stream = null;
+  updateVoiceButtons();
+  say(['🎧 Você saiu do chat de voz.']);
+}
+
+function toggleMute() {
+  if (!voice.on) return say(['Entre no chat de voz primeiro (botão 🎧).']);
+  voice.muted = !voice.muted;
+  voice.stream.getAudioTracks().forEach(t => { t.enabled = !voice.muted; });
+  updateVoiceButtons();
+}
+
+function setupVoiceEvents() {
+  connection.on('VoiceMembers', ids => { voice.members = new Set(ids); renderOnline(); });
+  connection.on('VoiceRoster', ids => { ids.forEach(id => { voice.members.add(id); callPeer(id).catch(() => closePeer(id)); }); });
+  connection.on('VoiceState', (id, on) => {
+    if (on) voice.members.add(id); else { voice.members.delete(id); closePeer(id); }
+    renderOnline();
+  });
+  connection.on('VoiceSignal', handleVoiceSignal);
+}
+
+voiceBtn.addEventListener('click', () => (voice.on ? leaveVoice() : joinVoice()));
+micBtn.addEventListener('click', toggleMute);

@@ -37,6 +37,11 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
         (25, "comprou tomates na barraca 🍅"), (26, "bateu na porta... ninguém atendeu 🚪"),
     };
 
+    // Chat de voz (WebRTC): o servidor só sabe quem está na voz e repassa as mensagens de conexão (offer/answer/ICE).
+    // O áudio em si vai direto entre os navegadores.
+    private static readonly object VoiceLock = new();
+    private static readonly HashSet<string> VoiceMembers = new();
+
     public async Task JoinGame(string name, string character)
     {
         var sprite = SanitizeCharacter(character);
@@ -62,6 +67,9 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
         lock (History) history = History.ToArray();
         await Clients.Caller.SendAsync("ChatHistory", history);
         await Clients.Caller.SendAsync("TagState", TagGame.Snapshot());
+        string[] inVoice;
+        lock (VoiceLock) inVoice = VoiceMembers.Where(Players.ContainsKey).ToArray();
+        await Clients.Caller.SendAsync("VoiceMembers", inVoice);
         await Clients.OthersInGroup(Room).SendAsync("PlayerJoined", player);
     }
 
@@ -264,6 +272,37 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
         await SayAll($"{me.Name} {Spots[spot].Text}");
     }
 
+    // Entra no chat de voz. Quem entra liga para cada pessoa que já estava (assim só um lado inicia cada conexão).
+    public async Task JoinVoice()
+    {
+        if (!Players.TryGetValue(Context.ConnectionId, out var me)) return;
+        string[] roster;
+        lock (VoiceLock)
+        {
+            roster = VoiceMembers.Where(Players.ContainsKey).ToArray();
+            VoiceMembers.Add(me.Id);
+        }
+        await Clients.Caller.SendAsync("VoiceRoster", roster);
+        await Clients.OthersInGroup(Room).SendAsync("VoiceState", me.Id, true);
+        await SayAll($"🎧 {me.Name} entrou no chat de voz.");
+    }
+
+    public async Task LeaveVoice()
+    {
+        bool removed;
+        lock (VoiceLock) removed = VoiceMembers.Remove(Context.ConnectionId);
+        if (removed) await Clients.OthersInGroup(Room).SendAsync("VoiceState", Context.ConnectionId, false);
+    }
+
+    // Repassa uma mensagem de conexão de voz (SDP/ICE em JSON) para outro participante da voz
+    public async Task VoiceSignal(string toId, string payload)
+    {
+        if (payload is null || payload.Length > 20_000 || toId == Context.ConnectionId) return;
+        lock (VoiceLock)
+            if (!VoiceMembers.Contains(Context.ConnectionId) || !VoiceMembers.Contains(toId)) return;
+        await Clients.Client(toId).SendAsync("VoiceSignal", Context.ConnectionId, payload);
+    }
+
     // Pique-pega
     public Task StartTag() => TagGame.Start(hubContext, Context.ConnectionId);
     public Task StopTag() => TagGame.Stop(hubContext, Context.ConnectionId);
@@ -280,6 +319,8 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
         DanceSeconds.TryRemove(id, out _);
         foreach (var key in GrantedTitles.Keys.Where(k => k.StartsWith(id + "|"))) GrantedTitles.TryRemove(key, out _);
         AvatarStore.RemoveOwnedBy(id);
+
+        lock (VoiceLock) VoiceMembers.Remove(id);
 
         if (Players.TryRemove(id, out var gone))
         {
