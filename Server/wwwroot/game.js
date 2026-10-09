@@ -948,10 +948,13 @@ EMOTES.forEach((emoji, i) => {
 document.getElementById('emoteBtn').addEventListener('click', () => emoteTray.classList.toggle('open'));
 
 // ---- Música ambiente gerada por código (nenhum arquivo de áudio) ----
-const music = { ctx: null, master: null, bus: null, timer: null, step: 0, muted: false };
-try { music.muted = localStorage.getItem('muted') === '1'; } catch {}
+// muted = música (ambiente e de dança); sfxMuted = efeitos (avisos, golpes, dano, dash). Cada um tem seu botão.
+const music = { ctx: null, master: null, bus: null, timer: null, step: 0, muted: false, sfxMuted: false };
+try { music.muted = localStorage.getItem('muted') === '1'; music.sfxMuted = localStorage.getItem('sfxMuted') === '1'; } catch {}
 const muteBtn = document.getElementById('muteBtn');
-muteBtn.textContent = music.muted ? '🔇' : '🔊';
+const sfxBtn = document.getElementById('sfxBtn');
+muteBtn.textContent = music.muted ? '🔇' : '🎵';
+sfxBtn.textContent = music.sfxMuted ? '🔕' : '🔊';
 
 // Cada período do dia tem seu clima: acordes (notas MIDI) e duração do compasso em segundos
 const MOODS = {
@@ -972,7 +975,7 @@ function unlockAudio() {
       music.master.gain.value = music.muted ? 0 : MUSIC_VOLUME;
       music.master.connect(ctx.destination);
       music.sfx = ctx.createGain(); // efeitos sonoros (volume próprio)
-      music.sfx.gain.value = music.muted ? 0 : 0.5;
+      music.sfx.gain.value = music.sfxMuted ? 0 : 0.5;
       music.sfx.connect(ctx.destination);
       // eco suave para dar ambiente
       const delay = ctx.createDelay(1), feedback = ctx.createGain(), wet = ctx.createGain();
@@ -1090,11 +1093,19 @@ setInterval(() => setDanceMusic(anyoneDancing()), 400);
 
 muteBtn.addEventListener('click', () => {
   music.muted = !music.muted;
-  muteBtn.textContent = music.muted ? '🔇' : '🔊';
+  muteBtn.textContent = music.muted ? '🔇' : '🎵';
   try { localStorage.setItem('muted', music.muted ? '1' : '0'); } catch {}
   unlockAudio();
   if (music.master) music.master.gain.setTargetAtTime(music.muted ? 0 : MUSIC_VOLUME, music.ctx.currentTime, 0.15);
-  if (music.sfx) music.sfx.gain.setTargetAtTime(music.muted ? 0 : 0.5, music.ctx.currentTime, 0.15);
+});
+
+// 🔊/🔕: efeitos sonoros (golpes, dano, dash, avisos de chat e de entrada) ligados/desligados à parte da música
+sfxBtn.addEventListener('click', () => {
+  music.sfxMuted = !music.sfxMuted;
+  sfxBtn.textContent = music.sfxMuted ? '🔕' : '🔊';
+  try { localStorage.setItem('sfxMuted', music.sfxMuted ? '1' : '0'); } catch {}
+  unlockAudio();
+  if (music.sfx) music.sfx.gain.setTargetAtTime(music.sfxMuted ? 0 : 0.5, music.ctx.currentTime, 0.05);
 });
 
 // ======================= Ações sociais, comandos, pique-pega e títulos =======================
@@ -1192,7 +1203,7 @@ function onTitleEarned(t) {
 
 // ---- Aviso sonoro quando um amigo entra ----
 function playChime() {
-  if (!music.ctx || !music.sfx || music.muted || music.ctx.state !== 'running') return;
+  if (!music.ctx || !music.sfx || music.sfxMuted || music.ctx.state !== 'running') return;
   const t0 = music.ctx.currentTime;
   [[880, 0], [1318.5, 0.14]].forEach(([freq, delay]) => {
     const osc = music.ctx.createOscillator(), g = music.ctx.createGain();
@@ -1209,7 +1220,7 @@ function playChime() {
 let lastPing = 0;
 function playPing() {
   unlockAudio(); // cria/retoma o áudio se o navegador o tiver suspendido
-  if (!music.ctx || !music.sfx || music.muted) return;
+  if (!music.ctx || !music.sfx || music.sfxMuted) return;
   const now = Date.now();
   if (now - lastPing < 150) return; // várias mensagens juntas não viram uma rajada de sons
   lastPing = now;
@@ -2029,7 +2040,7 @@ function dashFx(id, dir) {
 
 // Sons estilo 16 bits: notas em degraus (ondas quadrada/serra/triângulo) e rajadas de ruído, como nos consoles antigos
 function chip(notes, step, type = 'square', gain = 0.1) {
-  if (!music.ctx || !music.sfx || music.muted || music.ctx.state !== 'running') return;
+  if (!music.ctx || !music.sfx || music.sfxMuted || music.ctx.state !== 'running') return;
   const t0 = music.ctx.currentTime, o = music.ctx.createOscillator(), g = music.ctx.createGain();
   o.type = type;
   notes.forEach((f, i) => o.frequency.setValueAtTime(f || 1, t0 + i * step)); // sem rampa: a frequência "pula" de nota em nota
@@ -2041,7 +2052,7 @@ function chip(notes, step, type = 'square', gain = 0.1) {
 }
 let noiseBuf = null;
 function chipNoise(dur, gain = 0.12, filter = 'highpass', cutoff = 2000, delay = 0) {
-  if (!music.ctx || !music.sfx || music.muted || music.ctx.state !== 'running') return;
+  if (!music.ctx || !music.sfx || music.sfxMuted || music.ctx.state !== 'running') return;
   const ctx = music.ctx;
   if (!noiseBuf) { // ruído "áspero": valores sorteados e mantidos por 2 amostras (parece de chip de som)
     noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 0.5, ctx.sampleRate);
