@@ -1,7 +1,7 @@
 // Páginas em cache: logo depois de uma atualização o navegador pode misturar um index.html antigo com este game.js novo
 // (faltam elementos, o script quebra no meio e o personagem "trava" até apertar F5). Se faltar algum elemento, recarrega uma vez.
 (() => {
-  const need = ['join', 'chat', 'online', 'sfxBtn', 'helpBtn', 'helpModal', 'moveHint', 'arenaRank', 'arenaBar', 'arenaMsg', 'arenaWeapons', 'attackBtn'];
+  const need = ['join', 'stick', 'stickKnob', 'fsBtn', 'fsBtnDesk', 'chat', 'online', 'sfxBtn', 'helpBtn', 'helpModal', 'moveHint', 'arenaRank', 'arenaBar', 'arenaMsg', 'arenaWeapons', 'attackBtn'];
   let missing = need.some(id => !document.getElementById(id));
   try {
     if (!missing) { sessionStorage.removeItem('staleReload'); return; }
@@ -476,7 +476,7 @@ function update(time, delta) {
   const typing = document.activeElement === chatInput;
   let left = (!typing && cursors.left.isDown) || touch.left;
   let right = (!typing && cursors.right.isDown) || touch.right;
-  let jump = (!typing && cursors.up.isDown) || touch.jump;
+  let jump = (!typing && cursors.up.isDown) || touch.jump || touch.stickUp;
   if (isCombat() && !arenaMeAlive()) left = right = jump = false; // caído: espera o respawn
   if (!moveHintDone && (left || right || jump)) hideMoveHint();
   const carrierId = ridingMap[myId()];
@@ -575,7 +575,7 @@ function safe(fn) {
 }
 
 // ---- Controles de toque (celular) ----
-const touch = { left: false, right: false, jump: false };
+const touch = { left: false, right: false, jump: false, stickUp: false };
 document.querySelectorAll('#touch button[data-key]').forEach(btn => {
   const key = btn.dataset.key;
   const set = v => e => { e.preventDefault(); touch[key] = v; };
@@ -583,6 +583,53 @@ document.querySelectorAll('#touch button[data-key]').forEach(btn => {
   ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => btn.addEventListener(ev, set(false)));
   btn.addEventListener('contextmenu', e => e.preventDefault());
 });
+const fsBtn = document.getElementById('fsBtn'), fsBtnDesk = document.getElementById('fsBtnDesk'); // celular: acima do chat; computador: ao lado do ?
+// Tela cheia (celular e computador). No iPhone o navegador não permite tela cheia em páginas: aparece um aviso.
+const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement;
+function toggleFullscreen() {
+  const d = document, el = d.documentElement;
+  if (fsElement()) { (d.exitFullscreen || d.webkitExitFullscreen).call(d); return; }
+  const req = el.requestFullscreen || el.webkitRequestFullscreen;
+  if (!req) return say(['⚠️ Este navegador não permite tela cheia aqui. No iPhone, use "Compartilhar → Adicionar à Tela de Início" para abrir o jogo sem barras.']);
+  const p = req.call(el);
+  if (p && p.then) p.then(() => { if (coarsePointer) screen.orientation?.lock?.('landscape')?.catch?.(() => {}); }).catch(() => say(['⚠️ O navegador recusou a tela cheia. Tente de novo.']));
+}
+function updateFsIcons() {
+  const on = !!fsElement();
+  for (const b of [fsBtn, fsBtnDesk]) { b.textContent = on ? '🗗' : '⛶'; b.title = on ? 'Sair da tela cheia' : 'Tela cheia'; }
+}
+[fsBtn, fsBtnDesk].forEach(b => b.addEventListener('click', toggleFullscreen));
+['fullscreenchange', 'webkitfullscreenchange'].forEach(ev => document.addEventListener(ev, updateFsIcons));
+
+// Analógico virtual (celular): arrastar para os lados anda, arrastar para cima pula (o botão ▲ da direita continua valendo)
+const stickEl = document.getElementById('stick'), stickKnob = document.getElementById('stickKnob');
+const STICK_DEAD = 20, STICK_UP = 26; // px a partir do centro para contar como "esquerda/direita" e "cima"
+let stickPointer = null;
+function stickMove(e) {
+  const r = stickEl.getBoundingClientRect(), max = r.width / 2 - 14;
+  let dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
+  const d = Math.hypot(dx, dy);
+  if (d > max) { dx *= max / d; dy *= max / d; }
+  stickKnob.style.transform = `translate(${dx}px, ${dy}px)`;
+  touch.left = dx < -STICK_DEAD; touch.right = dx > STICK_DEAD; touch.stickUp = dy < -STICK_UP;
+}
+function stickRelease() {
+  stickPointer = null;
+  stickEl.classList.remove('active');
+  stickKnob.style.transform = '';
+  touch.left = touch.right = touch.stickUp = false;
+}
+stickEl.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  stickPointer = e.pointerId;
+  try { stickEl.setPointerCapture(e.pointerId); } catch {}
+  stickEl.classList.add('active');
+  stickMove(e);
+});
+stickEl.addEventListener('pointermove', e => { if (e.pointerId === stickPointer) { e.preventDefault(); stickMove(e); } });
+['pointerup', 'pointercancel', 'lostpointercapture'].forEach(ev => stickEl.addEventListener(ev, e => { if (e.pointerId === stickPointer) stickRelease(); }));
+stickEl.addEventListener('contextmenu', e => e.preventDefault());
+
 if (matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window) {
   document.getElementById('touch').style.display = 'flex';
 }
@@ -623,7 +670,7 @@ const helpBtn = document.getElementById('helpBtn');
 let moveHintDone = false;
 function showMoveHint() {
   if (moveHintDone) return;
-  moveHint.textContent = coarsePointer ? 'Use os botões ◀ ▶ para andar' : 'Use as setas ← → para andar (↑ para pular)';
+  moveHint.textContent = coarsePointer ? 'Arraste a bolinha da esquerda para andar (para cima = pular)' : 'Use as setas ← → para andar (↑ para pular)';
   moveHint.hidden = false;
 }
 function hideMoveHint() {
@@ -649,6 +696,8 @@ function positionChat() {
   arenaBarEl.style.top = r.top + 8 + 'px'; // no alto, para não cobrir os personagens na calçada
   arenaMsgEl.style.left = r.left + r.width / 2 + 'px';
   arenaMsgEl.style.top = r.top + r.height * 0.38 + 'px';
+  fsBtnDesk.style.right = innerWidth - r.right + 12 + 44 + 'px';
+  fsBtnDesk.style.bottom = innerHeight - r.bottom + 12 + 'px';
   helpBtn.style.right = innerWidth - r.right + 12 + 'px';
   helpBtn.style.bottom = innerHeight - r.bottom + (coarsePointer ? 108 : 12) + 'px'; // no celular fica acima dos botões de toque
   chatEl.style.left = r.left + 12 + 'px';
@@ -1607,6 +1656,7 @@ function setupHelp() {
     box.appendChild(det);
   }
   helpBtn.hidden = false;
+  fsBtnDesk.hidden = coarsePointer; // no celular o botão de tela cheia fica na coluna da esquerda
   helpBtn.addEventListener('click', () => { helpModal.hidden = !helpModal.hidden; });
   document.getElementById('helpClose').addEventListener('click', () => { helpModal.hidden = true; });
   helpModal.addEventListener('click', e => { if (e.target === helpModal) helpModal.hidden = true; });
@@ -2614,7 +2664,7 @@ const ARENA_HELP = [
   '🗡️ Atacar: aperte Espaço (ou X). O golpe vai para o lado em que você está virado. No celular, use o botão 🗡️.',
   '🎒 Armas: teclas 1 a 5 ou toque nos ícones embaixo — ⚔️ Espada (equilibrada), 🔱 Lança (alcance longo), 🏹 Arco (flecha à distância), 🔨 Martelo (lento, forte e empurra longe), 🐾 Garras (rápidas, dano baixo).',
   '🏆 Pontos: +1 por golpe que acerta e +10 por derrotar alguém. O ranking fica no canto superior esquerdo.',
-  '💨 Dash: toque duas vezes rápido na seta ← ou →. Vale também no ar! (No celular, dois toques em ◀ ou ▶.)',
+  '💨 Dash: toque duas vezes rápido na seta ← ou →. Vale também no ar! (No celular, empurre a bolinha duas vezes rápido para o lado.)',
   '🚪 Sair: ande até o começo da arena (esquerda) e segure ← por um instante para voltar ao vilarejo.',
   'Na arena não dá para subir nas costas, dançar, empurrar ou cumprimentar. Emotes: botão 😀 ou /emote N (de 1 a 6).',
 ];
@@ -2630,7 +2680,7 @@ Object.assign(HELP, {
   ],
   dash: [
     '💨 Dash: toque duas vezes rápido na seta ← ou → para dar um pequeno impulso. Vale também no ar! Depois há uma pequena pausa antes de usar de novo.',
-    'No celular, dois toques em ◀ ou ▶.',
+    'No celular, empurre a bolinha da esquerda duas vezes rápido para o lado.',
   ],
 });
 HELP_GROUPS.push({ title: '💨 Movimento, floresta e arena', keys: ['dash', 'floresta', 'arena'] });
