@@ -619,7 +619,7 @@ function toggleFullscreen() {
 }
 function updateFsIcons() {
   const on = !!fsElement();
-  for (const b of [fsBtn, fsBtnDesk]) { b.textContent = on ? '🗗' : '⛶'; b.title = on ? 'Sair da tela cheia' : 'Tela cheia'; }
+  for (const b of [fsBtn, fsBtnDesk]) { b.textContent = '⛶'; b.title = on ? 'Sair da tela cheia' : 'Tela cheia'; }
 }
 [fsBtn, fsBtnDesk].forEach(b => b.addEventListener('click', toggleFullscreen));
 ['fullscreenchange', 'webkitfullscreenchange'].forEach(ev => document.addEventListener(ev, updateFsIcons));
