@@ -12,6 +12,10 @@ public class GameHub : Hub
     private static readonly Queue<ChatMessage> History = new();
     private static readonly ConcurrentDictionary<string, long> LastChatAt = new();
 
+    // Emotes: só o índice viaja; os ícones ficam no cliente
+    private const int EmoteCount = 6;
+    private static readonly ConcurrentDictionary<string, long> LastEmoteAt = new();
+
     public async Task JoinGame(string name, string character)
     {
         var sprite = SanitizeCharacter(character);
@@ -77,6 +81,15 @@ public class GameHub : Hub
         await Clients.Group(Room).SendAsync("ChatMessage", msg);
     }
 
+    public async Task Emote(int id)
+    {
+        if (!Players.ContainsKey(Context.ConnectionId) || id < 0 || id >= EmoteCount) return;
+        var now = Environment.TickCount64;
+        if (LastEmoteAt.TryGetValue(Context.ConnectionId, out var last) && now - last < 500) return;
+        LastEmoteAt[Context.ConnectionId] = now;
+        await Clients.OthersInGroup(Room).SendAsync("PlayerEmote", Context.ConnectionId, id);
+    }
+
     public async Task UpdatePosition(float x, float y)
     {
         if (!Players.TryGetValue(Context.ConnectionId, out var player)) return;
@@ -88,6 +101,7 @@ public class GameHub : Hub
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         LastChatAt.TryRemove(Context.ConnectionId, out _);
+        LastEmoteAt.TryRemove(Context.ConnectionId, out _);
         AvatarStore.RemoveOwnedBy(Context.ConnectionId);
         if (Players.TryRemove(Context.ConnectionId, out _))
             await Clients.OthersInGroup(Room).SendAsync("PlayerLeft", Context.ConnectionId);

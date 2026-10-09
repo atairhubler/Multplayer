@@ -49,8 +49,29 @@
     #chatBar[hidden] { display: none; }
     #chatBar input { width: 100%; box-sizing: border-box; padding: 8px 10px; font-size: 16px; border: 1px solid #fff9;
       border-radius: 6px; background: rgba(0, 0, 0, .55); color: #fff; outline: none; user-select: text; -webkit-user-select: text; }
-    #talkBtn { width: 56px !important; height: 56px !important; font-size: 24px !important; align-self: flex-end; }
     @media (pointer: coarse) { #chatLog { font-size: 13px; } }
+    /* Lista de online + botão de música (canto superior direito do jogo) */
+    #online { position: fixed; top: 8px; right: 8px; z-index: 6; min-width: 120px; max-width: 200px; background: rgba(0, 0, 0, .45);
+      border-radius: 8px; padding: 4px 6px; font-size: 13px; text-shadow: 1px 1px 2px #000; }
+    #online[hidden] { display: none; }
+    #onlineHead { display: flex; justify-content: space-between; gap: 6px; }
+    #online button { width: auto; padding: 2px 8px; font-size: 14px; background: none; border: none; color: #fff; }
+    #onlineList { list-style: none; margin: 4px 0 2px; padding: 0 4px; max-height: 40vh; overflow-y: auto; }
+    #onlineList li { padding: 1px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #onlineList li.me { color: #ffd966; }
+    #online.closed #onlineList, #online.closed #onlineHint { display: none; }
+    #onlineHint { font-size: 11px; color: #cfd8dc; padding: 2px 4px; }
+    /* Emotes no celular */
+    #emoteTray { display: none; position: fixed; bottom: 84px; left: 50%; transform: translateX(-50%); gap: 8px; z-index: 7;
+      background: rgba(0, 0, 0, .55); padding: 8px; border-radius: 12px; }
+    #emoteTray.open { display: flex; }
+    #emoteTray button { width: 48px; height: 48px; font-size: 26px; border-radius: 50%; padding: 0; }
+    .grp.mid { align-items: flex-end; }
+    #talkBtn, #emoteBtn { width: 56px !important; height: 56px !important; font-size: 24px !important; align-self: flex-end; }
+    /* Aviso para girar o celular (modo paisagem obrigatório) */
+    #rotate { display: none; position: fixed; inset: 0; z-index: 50; background: #111; color: #fff; flex-direction: column;
+      align-items: center; justify-content: center; gap: 14px; text-align: center; font-size: 18px; padding: 24px; }
+    @media (orientation: portrait) and (pointer: coarse) { #rotate { display: flex; } }
     #touch { display: none; position: fixed; left: 0; right: 0; bottom: 16px; padding: 0 16px; box-sizing: border-box;
       justify-content: space-between; z-index: 5; pointer-events: none; }
     #touch .grp { display: flex; gap: 14px; }
@@ -95,9 +116,16 @@
   </aside>
   <div id="game"></div>
   <div id="sprites"></div>
+  <div id="online" hidden>
+    <div id="onlineHead"><button id="onlineToggle" title="Quem está online">👥 <span id="onlineCount">1</span></button><button id="muteBtn" title="Música">🔊</button></div>
+    <ul id="onlineList"></ul>
+    <div id="onlineHint">Emotes: teclas 1 a 6</div>
+  </div>
+  <div id="emoteTray"></div>
+  <div id="rotate"><div style="font-size:64px">📱</div><div>Gire o celular para o modo paisagem para jogar</div></div>
   <div id="touch">
     <div class="grp"><button data-key="left">◀</button><button data-key="right">▶</button></div>
-    <button id="talkBtn" title="Falar">💬</button>
+    <div class="grp mid"><button id="talkBtn" title="Falar">💬</button><button id="emoteBtn" title="Emotes">😀</button></div>
     <div class="grp"><button data-key="jump">▲</button></div>
   </div>
 

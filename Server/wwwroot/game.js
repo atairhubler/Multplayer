@@ -5,7 +5,11 @@ const SERVER_URL = location.hostname.endsWith('github.io') ? PRODUCTION_URL
 
 const COLORS = { red: 0xe74c3c, blue: 0x3498db, green: 0x2ecc71, yellow: 0xf1c40f };
 const WORLD_W = 1280, VIEW_H = 600; // mapa inteiro sempre visível (escala FIT)
+const GROUND_TOP = 594; // onde os pés ficam: bem perto do limite de baixo, na calçada do fundo
 const SEND_INTERVAL_MS = 50; // throttle: ~20 envios/s
+const CHAR_SCALE = 1.4; // tamanho do personagem (1 = 32x48)
+const CHAR_W = Math.round(32 * CHAR_SCALE), CHAR_H = Math.round(48 * CHAR_SCALE);
+const LABEL_DY = CHAR_H / 2 + 14, BUBBLE_DY = CHAR_H / 2 + 26; // nome e balão acima da cabeça
 
 let connection;
 let myName = '';
@@ -108,6 +112,11 @@ dollInputs.forEach(el => el.addEventListener('input', () => {
 }));
 
 document.getElementById('join').addEventListener('click', async () => {
+  unlockAudio(); // precisa acontecer dentro do clique (política dos navegadores)
+  if (matchMedia('(pointer: coarse)').matches) { // celular: tela cheia + paisagem (onde o navegador permitir)
+    document.documentElement.requestFullscreen?.()
+      .then(() => screen.orientation?.lock?.('landscape')).catch(() => {});
+  }
   myName = document.getElementById('name').value.trim() || 'Jogador';
   const errorEl = document.getElementById('error');
   errorEl.textContent = '';
@@ -149,7 +158,9 @@ document.getElementById('join').addEventListener('click', async () => {
   }
 
   document.getElementById('login').style.display = 'none';
+  saveProfile();
   setupChat();
+  startMusic();
   startPhaser();
 });
 
@@ -176,9 +187,9 @@ function updateGifs() {
   const r = phaserGame.canvas.getBoundingClientRect();
   const k = r.width / WORLD_W;
   for (const { sprite, img } of gifSprites) {
-    img.style.width = 32 * k + 'px';
-    img.style.height = 48 * k + 'px';
-    img.style.transform = `translate(${r.left + (sprite.x - 16) * k}px, ${r.top + (sprite.y - 24) * k}px)`;
+    img.style.width = CHAR_W * k + 'px';
+    img.style.height = CHAR_H * k + 'px';
+    img.style.transform = `translate(${r.left + (sprite.x - CHAR_W / 2) * k}px, ${r.top + (sprite.y - CHAR_H / 2) * k}px)`;
   }
 }
 
@@ -187,7 +198,7 @@ function makeSprite(scene, character) {
   if (character.startsWith('char:')) return createDoll(scene, character);
   const isImage = character.startsWith('data:image/');
   const isUpload = character.startsWith('/avatars/');
-  const sprite = scene.add.image(0, 0, isImage || isUpload ? 'c_gray' : 'c_' + character).setDisplaySize(32, 48);
+  const sprite = scene.add.image(0, 0, isImage || isUpload ? 'c_gray' : 'c_' + character).setDisplaySize(CHAR_W, CHAR_H);
   if (isUpload) {
     // GIF animado: o canvas não anima, então uma <img> HTML acompanha o sprite (que fica invisível)
     const img = document.createElement('img');
@@ -201,7 +212,7 @@ function makeSprite(scene, character) {
   }
   if (isImage) {
     const key = 'u_' + character.length + '_' + character.slice(-40);
-    const apply = () => { if (sprite.active) sprite.setTexture(key).setDisplaySize(32, 48); };
+    const apply = () => { if (sprite.active) sprite.setTexture(key).setDisplaySize(CHAR_W, CHAR_H); };
     if (scene.textures.exists(key)) apply();
     else {
       const img = new Image();
@@ -225,10 +236,11 @@ function createRemote(scene, p, announce = false) {
   if (remotePlayers[p.id]) return;
   const rect = makeSprite(scene, p.characterSprite || 'red').setPosition(p.x, p.y);
   if (announce) addChatLine(null, p.name + ' entrou');
-  const label = scene.add.text(p.x, p.y - 38, p.name, {
+  const label = scene.add.text(p.x, p.y - LABEL_DY, p.name, {
     fontSize: '14px', color: '#fff', stroke: '#000', strokeThickness: 3
   }).setOrigin(0.5);
   remotePlayers[p.id] = { rect, label, name: p.name, targetX: p.x, targetY: p.y };
+  renderOnline();
 }
 
 // ---- Balões de fala sobre a cabeça ----
@@ -251,7 +263,7 @@ function updateBubbles(now) {
     const anchor = id === connection.connectionId ? player : remotePlayers[id]?.rect;
     if (!anchor || now > b.expires) { b.text.destroy(); delete bubbles[id]; continue; }
     const half = b.text.width / 2;
-    b.text.setPosition(Phaser.Math.Clamp(anchor.x, half, WORLD_W - half), anchor.y - 50);
+    b.text.setPosition(Phaser.Math.Clamp(anchor.x, half, WORLD_W - half), anchor.y - BUBBLE_DY);
   }
 }
 
@@ -296,11 +308,11 @@ function create() {
     this.physics.add.existing(r, true);
     platforms.add(r);
   };
-  addPlatform(WORLD_W / 2, 580, WORLD_W, 40, null); // chão invisível (o chão visível é a rua do fundo)
+  addPlatform(WORLD_W / 2, GROUND_TOP + 20, WORLD_W, 40, null); // chão invisível rente à borda inferior (a calçada de pedra do fundo)
 
   // Jogador local
   // O corpo físico é um retângulo invisível; a imagem do personagem o acompanha
-  player = this.add.rectangle(0, 0, 32, 48).setVisible(false);
+  player = this.add.rectangle(0, 0, CHAR_W, CHAR_H).setVisible(false);
   localSprite = makeSprite(this, myCharacter);
   this.physics.add.existing(player);
   player.x = 100; player.y = 400;
@@ -323,6 +335,7 @@ function create() {
     const r = remotePlayers[id];
     if (r) { r.targetX = x; r.targetY = y; }
   });
+  connection.on('PlayerEmote', (id, i) => showEmote(id, EMOTES[i]));
   connection.on('PlayerLeft', id => {
     const r = remotePlayers[id];
     if (!r) return;
@@ -330,6 +343,7 @@ function create() {
     r.rect.destroy();
     r.label.destroy();
     delete remotePlayers[id];
+    renderOnline();
   });
 
   connection.invoke('JoinGame', myName, myCharacter);
@@ -352,7 +366,7 @@ function update(time, delta) {
     const vx = body.velocity.x;
     localSprite.animate(Math.abs(vx) > 10, !body.blocked.down, vx, delta);
   }
-  nameLabel.setPosition(player.x, player.y - 38);
+  nameLabel.setPosition(player.x, player.y - LABEL_DY);
 
   // Envia posição só se mudou, com throttle
   if (time - lastSent > SEND_INTERVAL_MS &&
@@ -370,7 +384,7 @@ function update(time, delta) {
     r.rect.x = Phaser.Math.Linear(r.rect.x, r.targetX, 0.25);
     r.rect.y = Phaser.Math.Linear(r.rect.y, r.targetY, 0.25);
     r.rect.animate?.(Math.abs(dx) > 0.8, Math.abs(dy) > 2, dx, delta);
-    r.label.setPosition(r.rect.x, r.rect.y - 38);
+    r.label.setPosition(r.rect.x, r.rect.y - LABEL_DY);
   }
   updateGifs();
   positionChat();
@@ -419,6 +433,9 @@ function addChatLine(name, text) {
 const coarsePointer = matchMedia('(pointer: coarse)').matches;
 function positionChat() {
   const r = phaserGame.canvas.getBoundingClientRect();
+  onlineEl.style.top = r.top + 8 + 'px';
+  onlineEl.style.right = innerWidth - r.right + 8 + 'px';
+  emoteTray.style.bottom = innerHeight - r.bottom + 84 + 'px';
   chatEl.style.left = r.left + 12 + 'px';
   chatEl.style.width = Math.min(coarsePointer ? 250 : 360, r.width * 0.45) + 'px';
   chatLog.style.maxHeight = r.height * (coarsePointer ? 0.4 : 0.5) + 'px'; // até a metade do jogo
@@ -433,6 +450,9 @@ function positionChat() {
 
 function setupChat() {
   chatEl.classList.add('on');
+  onlineEl.hidden = false;
+  if (coarsePointer) onlineEl.classList.add('closed'); // no celular começa recolhido
+  renderOnline();
   connection.on('ChatHistory', list => list.forEach(m => addChatLine(m.name, m.text)));
   connection.on('ChatMessage', m => { addChatLine(m.name, m.text); showBubble(m.id, m.text); });
   chatReady = true;
@@ -578,12 +598,12 @@ function createDoll(scene, config) {
     rig.add(img);
     part[p.id] = img;
   }
-  const doll = scene.add.container(0, 0, [rig]);
+  const doll = scene.add.container(0, 0, [rig]).setScale(CHAR_SCALE);
   let phase = 0, dir = 1;
 
   doll.animate = (moving, air, vx, dt = 16) => {
     if (Math.abs(vx) > 0.5) dir = vx > 0 ? 1 : -1;
-    doll.scaleX = dir;
+    doll.scaleX = dir * CHAR_SCALE;
     let aN = 0, aF = 0, lN = 0, lF = 0, bob = 0;
     if (air) { lN = -0.7; lF = 0.5; aN = -2.3; aF = -1.9; }
     else if (moving) {
@@ -603,4 +623,167 @@ function createDoll(scene, config) {
   return doll;
 }
 
+// ---- Lembrar nome e aparência neste navegador ----
+// Guarda nome, gênero e cores (e a imagem estática enviada, que é pequena). GIFs animados
+// não são guardados: dependem do arquivo, então é só escolher de novo.
+function saveProfile() {
+  try {
+    const gender = document.querySelector('input[name=gender]:checked').value;
+    localStorage.setItem('profile', JSON.stringify({
+      name: myName === 'Jogador' && !document.getElementById('name').value.trim() ? '' : myName,
+      gender, hair: cHair.value, skin: cSkin.value, cloth: cCloth.value,
+      image: customImage && !customImage.startsWith('data:image/gif') ? customImage : null,
+    }));
+  } catch {}
+}
+
+function restoreProfile() {
+  try {
+    const p = JSON.parse(localStorage.getItem('profile') || 'null');
+    if (!p) return;
+    const hex = v => (/^#[0-9a-f]{6}$/i.test(v) ? v : null);
+    if (typeof p.name === 'string') document.getElementById('name').value = p.name.slice(0, 16);
+    const radio = document.querySelector(`input[name=gender][value="${p.gender === 'f' ? 'f' : 'm'}"]`);
+    if (radio) radio.checked = true;
+    cHair.value = hex(p.hair) || cHair.value;
+    cSkin.value = hex(p.skin) || cSkin.value;
+    cCloth.value = hex(p.cloth) || cCloth.value;
+    if (typeof p.image === 'string' && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(p.image) && p.image.length <= MAX_IMAGE_CHARS) {
+      customImage = p.image;
+      preview.src = customImage;
+      preview.hidden = false;
+      dollPreview.hidden = true;
+    }
+  } catch {}
+}
+const cHair = document.getElementById('cHair'), cSkin = document.getElementById('cSkin'), cCloth = document.getElementById('cCloth');
+restoreProfile();
 drawDollPreview(document.getElementById('dollPreview'), currentDollConfig());
+
+// ---- Lista de online ----
+const onlineEl = document.getElementById('online');
+function renderOnline() {
+  const list = document.getElementById('onlineList');
+  const names = [{ name: myName + ' (você)', me: true }, ...Object.values(remotePlayers).map(r => ({ name: r.name }))];
+  list.replaceChildren(...names.map(n => {
+    const li = document.createElement('li');
+    li.textContent = n.name; // textContent: nomes nunca viram HTML
+    if (n.me) li.className = 'me';
+    return li;
+  }));
+  document.getElementById('onlineCount').textContent = names.length;
+}
+document.getElementById('onlineToggle').addEventListener('click', () => onlineEl.classList.toggle('closed'));
+
+// ---- Emotes (teclas 1–6 no PC, bandeja no celular) ----
+const EMOTES = ['👋', '😂', '❤️', '👍', '😮', '😢'];
+let lastEmoteAt = 0;
+
+function showEmote(id, emoji) {
+  if (!gameScene || !emoji) return;
+  bubbles[id]?.text.destroy();
+  const text = gameScene.add.text(0, 0, emoji, { fontSize: '34px' }).setOrigin(0.5, 1).setDepth(10);
+  bubbles[id] = { text, expires: gameScene.time.now + 2500 };
+}
+
+function sendEmote(i) {
+  const now = Date.now();
+  if (!chatReady || now - lastEmoteAt < 500) return;
+  lastEmoteAt = now;
+  showEmote(connection.connectionId, EMOTES[i]); // aparece na hora para quem enviou
+  connection.invoke('Emote', i);
+}
+
+window.addEventListener('keydown', e => {
+  if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || !chatBar.hidden) return;
+  if (e.key >= '1' && e.key <= String(EMOTES.length)) sendEmote(Number(e.key) - 1);
+});
+
+const emoteTray = document.getElementById('emoteTray');
+EMOTES.forEach((emoji, i) => {
+  const b = document.createElement('button');
+  b.textContent = emoji;
+  b.addEventListener('click', () => { sendEmote(i); emoteTray.classList.remove('open'); });
+  emoteTray.appendChild(b);
+});
+document.getElementById('emoteBtn').addEventListener('click', () => emoteTray.classList.toggle('open'));
+
+// ---- Música ambiente gerada por código (nenhum arquivo de áudio) ----
+const music = { ctx: null, master: null, bus: null, timer: null, step: 0, muted: false };
+try { music.muted = localStorage.getItem('muted') === '1'; } catch {}
+const muteBtn = document.getElementById('muteBtn');
+muteBtn.textContent = music.muted ? '🔇' : '🔊';
+
+// Cada período do dia tem seu clima: acordes (notas MIDI) e duração do compasso em segundos
+const MOODS = {
+  10: { bar: 8, chords: [[60, 64, 67], [65, 69, 72], [67, 71, 74], [57, 60, 64]] },  // manhã: claro, Dó maior
+  15: { bar: 9, chords: [[65, 69, 72], [60, 64, 67], [62, 65, 69], [58, 62, 65]] },  // tarde: quente, Fá maior
+  18: { bar: 10, chords: [[57, 60, 64], [53, 57, 60], [60, 64, 67], [55, 59, 62]] }, // noite: calmo, Lá menor
+};
+const midiFreq = n => 440 * Math.pow(2, (n - 69) / 12);
+
+function unlockAudio() {
+  try {
+    if (!music.ctx) {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = music.ctx = new Ctx();
+      music.master = ctx.createGain();
+      music.master.gain.value = music.muted ? 0 : 0.5;
+      music.master.connect(ctx.destination);
+      // eco suave para dar ambiente
+      const delay = ctx.createDelay(1), feedback = ctx.createGain(), wet = ctx.createGain();
+      delay.delayTime.value = 0.42; feedback.gain.value = 0.35; wet.gain.value = 0.35;
+      music.bus = ctx.createGain();
+      music.bus.connect(music.master);
+      music.bus.connect(delay); delay.connect(feedback); feedback.connect(delay);
+      delay.connect(wet); wet.connect(music.master);
+    }
+    if (music.ctx.state === 'suspended') music.ctx.resume();
+  } catch {}
+}
+// se o navegador ainda não liberou o áudio, tenta de novo no próximo toque/tecla
+['pointerdown', 'keydown'].forEach(ev => window.addEventListener(ev, unlockAudio));
+
+function tone(freq, start, dur, type, gain, attack) {
+  const ctx = music.ctx, osc = ctx.createOscillator(), g = ctx.createGain();
+  osc.type = type; osc.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, start);
+  g.gain.linearRampToValueAtTime(gain, start + attack);
+  g.gain.linearRampToValueAtTime(0.0001, start + dur);
+  osc.connect(g); g.connect(music.bus);
+  osc.start(start); osc.stop(start + dur + 0.1);
+}
+
+function playBar() {
+  const ctx = music.ctx;
+  if (!ctx || ctx.state !== 'running') return;
+  const mood = MOODS[backgroundPeriod] || MOODS[10];
+  const chord = mood.chords[music.step++ % mood.chords.length];
+  const t0 = ctx.currentTime + 0.05, len = mood.bar;
+  for (const n of chord) tone(midiFreq(n - 12), t0, len + 3, 'triangle', 0.045, 2.5); // base suave
+  tone(midiFreq(chord[0] - 24), t0, len + 1, 'sine', 0.06, 1.5);                       // grave
+  const notes = Math.round(len * 0.8);                                                  // notas soltas
+  for (let i = 0; i < notes; i++) {
+    const at = t0 + (i + Math.random() * 0.6) * (len / notes);
+    const n = chord[Math.floor(Math.random() * chord.length)] + 12 * (1 + Math.floor(Math.random() * 2));
+    tone(midiFreq(n), at, 2.2, 'sine', 0.05, 0.02);
+  }
+}
+
+function startMusic() {
+  if (music.timer || !music.ctx) return;
+  const loop = () => {
+    playBar();
+    music.timer = setTimeout(loop, (MOODS[backgroundPeriod] || MOODS[10]).bar * 1000);
+  };
+  loop();
+}
+
+muteBtn.addEventListener('click', () => {
+  music.muted = !music.muted;
+  muteBtn.textContent = music.muted ? '🔇' : '🔊';
+  try { localStorage.setItem('muted', music.muted ? '1' : '0'); } catch {}
+  unlockAudio();
+  if (music.master) music.master.gain.setTargetAtTime(music.muted ? 0 : 0.5, music.ctx.currentTime, 0.15);
+});
