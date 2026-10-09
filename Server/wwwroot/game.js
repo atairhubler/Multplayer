@@ -361,8 +361,11 @@ function addChatLine(name, text) {
     who.textContent = name + ': ';
     p.append(who, document.createTextNode(text));
   }
+  // só acompanha as novas mensagens se o usuário não estiver lendo o histórico mais acima
+  const stick = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 30;
   chatLog.appendChild(p);
-  while (chatLog.children.length > 100) chatLog.firstChild.remove();
+  while (chatLog.children.length > 300) chatLog.firstChild.remove();
+  if (stick) chatLog.scrollTop = chatLog.scrollHeight;
   setTimeout(() => p.classList.add('old'), OLD_AFTER_MS);
 }
 
@@ -372,7 +375,7 @@ function positionChat() {
   const r = phaserGame.canvas.getBoundingClientRect();
   chatEl.style.left = r.left + 12 + 'px';
   chatEl.style.width = Math.min(coarsePointer ? 250 : 360, r.width * 0.45) + 'px';
-  chatLog.style.maxHeight = r.height * (coarsePointer ? 0.3 : 0.26) + 'px';
+  chatLog.style.maxHeight = r.height * (coarsePointer ? 0.4 : 0.5) + 'px'; // até a metade do jogo
   if (coarsePointer) { // no celular os botões de toque ocupam a parte de baixo: chat no topo
     chatEl.style.top = r.top + 8 + 'px';
     chatEl.style.bottom = 'auto';
@@ -397,6 +400,7 @@ let chatReady = false;
 function openChatBar() {
   chatBar.hidden = false;
   chatEl.classList.add('active');
+  chatLog.scrollTop = chatLog.scrollHeight;
   chatInput.focus();
 }
 

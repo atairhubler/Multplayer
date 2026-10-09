@@ -30,9 +30,13 @@
     #chat { display: none; position: fixed; left: 12px; bottom: 12px; width: 360px; max-width: 70vw; z-index: 6; pointer-events: none;
       user-select: text; -webkit-user-select: text; }
     #chat.on { display: block; }
-    #chatLog { display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden; max-height: 26vh;
+    /* O log é rolável (roda do mouse / arrastar no toque); as mensagens ficam coladas embaixo e crescem para cima */
+    #chatLog { display: flex; flex-direction: column; overflow-y: auto; max-height: 50vh; pointer-events: auto; touch-action: pan-y;
       font-size: 14px; line-height: 1.35; padding: 4px 6px; border-radius: 6px; transition: background .2s;
-      -webkit-mask-image: linear-gradient(to bottom, transparent, #000 35%); mask-image: linear-gradient(to bottom, transparent, #000 35%); }
+      scrollbar-width: thin; scrollbar-color: #fff6 transparent; overscroll-behavior: contain; }
+    #chatLog > :first-child { margin-top: auto; }
+    #chatLog:hover { background: rgba(0, 0, 0, .35); }
+    #chatLog:hover p.old { opacity: 1; }
     #chatLog p { margin: 0 0 3px; flex: none; word-wrap: break-word; overflow-wrap: anywhere; color: #fff;
       text-shadow: 1px 1px 2px #000, -1px -1px 2px #000, 1px -1px 2px #000, -1px 1px 2px #000; transition: opacity 1s; }
     #chatLog .who { font-weight: bold; color: #ffd966; }
