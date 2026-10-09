@@ -33,9 +33,9 @@
     /* O log é rolável (roda do mouse / arrastar no toque); as mensagens ficam coladas embaixo e crescem para cima */
     #chatLog { display: flex; flex-direction: column; overflow-y: auto; max-height: 50vh; pointer-events: auto; touch-action: pan-y;
       font-size: 14px; line-height: 1.35; padding: 4px 6px; border-radius: 6px; transition: background .2s;
-      scrollbar-width: thin; scrollbar-color: #fff6 transparent; overscroll-behavior: contain; }
+      scrollbar-width: thin; scrollbar-color: transparent transparent; overscroll-behavior: contain; }
     #chatLog > :first-child { margin-top: auto; }
-    #chatLog:hover { background: rgba(0, 0, 0, .35); }
+    #chatLog:hover { background: rgba(0, 0, 0, .35); scrollbar-color: #fff8 transparent; } /* barra só aparece com o mouse em cima */
     #chatLog:hover p.old { opacity: 1; }
     #chatLog p { margin: 0 0 3px; flex: none; word-wrap: break-word; overflow-wrap: anywhere; color: #fff;
       text-shadow: 1px 1px 2px #000, -1px -1px 2px #000, 1px -1px 2px #000, -1px 1px 2px #000; transition: opacity 1s; }
