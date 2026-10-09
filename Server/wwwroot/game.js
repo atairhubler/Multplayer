@@ -16,7 +16,7 @@ let customImage = null; // data URL do avatar enviado pelo usuário
 const fileInput = document.getElementById('avatarFile');
 const preview = document.getElementById('avatarPreview');
 const MAX_IMAGE_CHARS = 40000; // imagens estáticas (recomprimidas)
-const MAX_GIF_BYTES = 250 * 1024; // GIFs animados são enviados como estão
+const MAX_GIF_BYTES = 3 * 1024 * 1024; // GIFs animados são enviados por upload ao servidor (mesmo limite dele)
 
 // Conta os quadros de um GIF percorrendo seus blocos
 function countGifFrames(bytes) {
@@ -49,8 +49,8 @@ function readAsDataURL(file) {
 async function processImage(file) {
   if (file.type === 'image/gif') {
     const frames = countGifFrames(new Uint8Array(await file.arrayBuffer()));
-    if (frames > 1) { // animado: mantém o GIF original (recomprimir no canvas perderia a animação)
-      if (file.size > MAX_GIF_BYTES) throw new Error('GIF muito grande (máximo 250 KB).');
+    if (frames > 1) { // animado: mantém o arquivo original (recomprimir no canvas perderia a animação)
+      if (file.size > MAX_GIF_BYTES) throw new Error('GIF muito grande (máximo 3 MB).');
       return readAsDataURL(file);
     }
   }
@@ -98,9 +98,28 @@ document.querySelectorAll('input[name=char]').forEach(r => r.addEventListener('c
 
 document.getElementById('join').addEventListener('click', async () => {
   myName = document.getElementById('name').value.trim() || 'Jogador';
-  myCharacter = customImage || document.querySelector('input[name=char]:checked').value;
   const errorEl = document.getElementById('error');
   errorEl.textContent = '';
+  const joinBtn = document.getElementById('join');
+
+  if (customImage && customImage.startsWith('data:image/gif')) {
+    // GIF animado: sobe o arquivo e usa só a URL devolvida pelo servidor
+    joinBtn.disabled = true;
+    errorEl.textContent = 'Enviando GIF...';
+    try {
+      const res = await fetch(`${SERVER_URL}/avatars`, { method: 'POST', body: fileInput.files[0] });
+      if (!res.ok) throw new Error();
+      myCharacter = (await res.json()).url;
+      errorEl.textContent = '';
+    } catch {
+      errorEl.textContent = 'Não foi possível enviar o GIF. Se o servidor estava dormindo, tente de novo em ~1 min.';
+      joinBtn.disabled = false;
+      return;
+    }
+    joinBtn.disabled = false;
+  } else {
+    myCharacter = customImage || document.querySelector('input[name=char]:checked').value;
+  }
 
   connection = new signalR.HubConnectionBuilder()
     .withUrl(`${SERVER_URL}/gamehub`)
@@ -151,12 +170,13 @@ function updateGifs() {
 // Cria o sprite de um personagem: cor sólida, ou imagem enviada (carregada de forma assíncrona)
 function makeSprite(scene, character) {
   const isImage = character.startsWith('data:image/');
-  const sprite = scene.add.image(0, 0, isImage ? 'c_gray' : 'c_' + character).setDisplaySize(32, 48);
-  if (character.startsWith('data:image/gif')) {
+  const isUpload = character.startsWith('/avatars/');
+  const sprite = scene.add.image(0, 0, isImage || isUpload ? 'c_gray' : 'c_' + character).setDisplaySize(32, 48);
+  if (isUpload) {
     // GIF animado: o canvas não anima, então uma <img> HTML acompanha o sprite (que fica invisível)
     const img = document.createElement('img');
     img.className = 'gifSprite';
-    img.src = character;
+    img.src = SERVER_URL + character;
     document.getElementById('sprites').appendChild(img);
     sprite.setAlpha(0);
     gifSprites.add({ sprite, img });

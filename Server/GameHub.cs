@@ -14,11 +14,14 @@ public class GameHub : Hub
 
     public async Task JoinGame(string name, string character)
     {
+        var sprite = SanitizeCharacter(character);
+        if (AvatarPath.IsMatch(sprite) && !AvatarStore.Claim(sprite[9..], Context.ConnectionId)) sprite = "red";
+
         var player = new Player
         {
             Id = Context.ConnectionId,
             Name = string.IsNullOrWhiteSpace(name) ? "Anon" : name.Trim()[..Math.Min(name.Trim().Length, 16)],
-            CharacterSprite = SanitizeCharacter(character),
+            CharacterSprite = sprite,
             X = 100,
             Y = 400
         };
@@ -36,9 +39,10 @@ public class GameHub : Hub
         await Clients.OthersInGroup(Room).SendAsync("PlayerJoined", player);
     }
 
+    private static readonly Regex AvatarPath = new(@"^/avatars/[0-9a-f]{32}$", RegexOptions.Compiled);
     private static readonly string[] Colors = { "red", "blue", "green", "yellow" };
-    private static readonly Regex ImageDataUrl = new(@"^data:image/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$", RegexOptions.Compiled);
-    private const int MaxImageChars = 400_000; // GIF animado de até ~250 KB
+    private static readonly Regex ImageDataUrl = new(@"^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$", RegexOptions.Compiled);
+    private const int MaxImageChars = 40_000;
 
     // Aceita uma cor conhecida ou uma imagem pequena em data URL; qualquer outra coisa vira "red"
     private static string SanitizeCharacter(string? character)
@@ -46,6 +50,7 @@ public class GameHub : Hub
         if (character is null) return "red";
         if (Colors.Contains(character)) return character;
         if (character.Length <= MaxImageChars && ImageDataUrl.IsMatch(character)) return character;
+        if (AvatarPath.IsMatch(character)) return character; // dono é verificado em JoinGame
         return "red";
     }
 
@@ -80,6 +85,7 @@ public class GameHub : Hub
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         LastChatAt.TryRemove(Context.ConnectionId, out _);
+        AvatarStore.RemoveOwnedBy(Context.ConnectionId);
         if (Players.TryRemove(Context.ConnectionId, out _))
             await Clients.OthersInGroup(Room).SendAsync("PlayerLeft", Context.ConnectionId);
 
