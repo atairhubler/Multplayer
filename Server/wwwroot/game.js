@@ -186,6 +186,10 @@ function fitGameToWindow() {
   const vv = window.visualViewport;
   el.style.width = Math.round(vv ? vv.width : innerWidth) + 'px';
   el.style.height = Math.round(vv ? vv.height : innerHeight) + 'px';
+  const t = document.getElementById('touch'); // os botões de toque ficam dentro da área visível (a barra do navegador pode cobrir o "bottom" da janela)
+  t.style.left = Math.round(vv ? vv.offsetLeft : 0) + 'px';
+  t.style.top = Math.round(vv ? vv.offsetTop : 0) + 'px';
+  t.style.width = el.style.width; t.style.height = el.style.height;
   try { phaserGame?.scale?.refresh(); } catch {}
 }
 function fitGameSoon() {

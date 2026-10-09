@@ -135,7 +135,7 @@
     #emoteTray button { width: 48px; height: 48px; font-size: 26px; border-radius: 50%; padding: 0; }
     #fsBtn, #talkBtn, #emoteBtn { width: 56px !important; height: 56px !important; font-size: 24px !important; }
     /* celular: balão de chat e emotes ficam na lateral esquerda, acima das setas; o botão de atacar fica ao lado do de pular (mesmo tamanho) */
-    #touch .grp.mid { position: fixed; left: 16px; bottom: 164px; flex-direction: column; gap: 12px; }
+    #touch > .grp.mid { left: 164px; right: auto; bottom: 16px; flex-direction: column; gap: 10px; } /* coluna ao lado do analógico: tela cheia, chat e emote */
     /* analógico virtual (esquerda): bolinha que se arrasta; também 70% transparente */
     #stick { pointer-events: auto; position: relative; width: 132px; height: 132px; border-radius: 50%; border: 2px solid #fff8;
       background: #0006; touch-action: none; opacity: .3; transition: opacity .1s; }
@@ -146,8 +146,11 @@
     #rotate { display: none; position: fixed; inset: 0; z-index: 50; background: #111; color: #fff; flex-direction: column;
       align-items: center; justify-content: center; gap: 14px; text-align: center; font-size: 18px; padding: 24px; }
     @media (orientation: portrait) and (pointer: coarse) { #rotate { display: flex; } }
-    #touch { display: none; position: fixed; left: 0; right: 0; bottom: 16px; padding: 0 16px; box-sizing: border-box;
-      justify-content: space-between; z-index: 5; pointer-events: none; }
+    /* camada dos botões de toque: cobre exatamente a área visível (o JS acerta posição/tamanho); cada grupo é fixado nos cantos */
+    #touch { display: none; position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; height: 100dvh; z-index: 5; pointer-events: none; }
+    #touch > .grp { position: absolute; bottom: 16px; }
+    #touch > .grp:first-child { left: 16px; }
+    #touch > .grp:last-child { right: 16px; }
     #touch .grp { display: flex; gap: 14px; }
     #touch button { pointer-events: auto; width: 76px; height: 76px; border-radius: 50%; border: 2px solid #fff8;
       background: #0006; color: #fff; font-size: 30px; touch-action: none; }
@@ -155,6 +158,14 @@
     /* botões do celular 70% transparentes (30% visíveis) para não atrapalhar a tela; ao tocar ficam mais visíveis */
     #touch button { opacity: .3; transition: opacity .1s; }
     #touch button:active { opacity: .65; }
+    /* telas baixas (celular na horizontal): tudo um pouco menor para nada ser cortado */
+    @media (max-height: 430px) {
+      #stick { width: 108px; height: 108px; }
+      #stickKnob { width: 46px; height: 46px; margin: -23px 0 0 -23px; }
+      #touch > .grp.mid { left: 140px; gap: 8px; }
+      #touch button { width: 62px; height: 62px; font-size: 24px; }
+      #fsBtn, #talkBtn, #emoteBtn { width: 46px !important; height: 46px !important; font-size: 20px !important; }
+    }
   </style>
 </head>
 <body>
