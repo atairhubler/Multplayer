@@ -13,6 +13,8 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
     p.AllowAnyHeader().AllowAnyMethod().AllowCredentials();
 }));
 
+builder.Services.AddSingleton<Db>();
+
 var app = builder.Build();
 
 app.UseCors();
@@ -20,6 +22,18 @@ app.UseDefaultFiles();
 app.UseStaticFiles(); // serve o cliente em wwwroot (uso local)
 
 app.MapGet("/health", () => "ok"); // para ping de keep-alive
+
+// Banco de dados: confere se a conexão com a Neon está funcionando (não mostra senha nem endereço)
+app.MapGet("/db-health", async (Db db) => Results.Json(await db.HealthAsync()));
+
+// Cria as tabelas ao iniciar, sem travar o servidor se o banco estiver indisponível
+app.Lifetime.ApplicationStarted.Register(() => _ = Task.Run(async () =>
+{
+    var db = app.Services.GetRequiredService<Db>();
+    if (!db.Enabled) { Console.WriteLine("[db] DATABASE_URL não configurada: o jogo roda sem banco de dados."); return; }
+    try { await db.EnsureSchemaAsync(); Console.WriteLine("[db] esquema verificado."); }
+    catch (Exception e) { Console.WriteLine("[db] não consegui preparar o banco: " + e.GetType().Name + " — " + e.Message); }
+}));
 
 // Servidores ICE para voz/tela (WebRTC). STUN descobre o endereço público; TURN retransmite quando duas redes
 // restritivas (dados móveis, CGNAT) não conseguem falar direto. Credenciais próprias: TURN_URLS (separadas por
