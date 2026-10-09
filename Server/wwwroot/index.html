@@ -26,7 +26,7 @@
     #sprites { position: fixed; inset: 0; pointer-events: none; z-index: 1; overflow: hidden; }
     .gifSprite { position: absolute; left: 0; top: 0; object-fit: cover; transform-origin: 0 0; }
     #error { color: #f77; margin-top: 10px; min-height: 18px; font-size: 13px; }
-    #game { width: 100vw; height: 100vh; }
+    #game { width: 100vw; height: 100vh; height: 100dvh; } /* dvh = só a área visível (sem a barra de endereço do celular) */
     /* Chat estilo MMORPG: canto inferior esquerdo, fundo transparente, sobre o jogo */
     #chat { display: none; position: fixed; left: 12px; bottom: 12px; width: 360px; max-width: 70vw; z-index: 6; pointer-events: none;
       user-select: text; -webkit-user-select: text; }
@@ -136,10 +136,10 @@
     #fsBtn, #talkBtn, #emoteBtn { width: 56px !important; height: 56px !important; font-size: 24px !important; }
     /* celular: balão de chat e emotes ficam na lateral esquerda, acima das setas; o botão de atacar fica ao lado do de pular (mesmo tamanho) */
     #touch .grp.mid { position: fixed; left: 16px; bottom: 164px; flex-direction: column; gap: 12px; }
-    /* analógico virtual (esquerda): bolinha que se arrasta; também 80% transparente */
+    /* analógico virtual (esquerda): bolinha que se arrasta; também 70% transparente */
     #stick { pointer-events: auto; position: relative; width: 132px; height: 132px; border-radius: 50%; border: 2px solid #fff8;
-      background: #0006; touch-action: none; opacity: .2; transition: opacity .1s; }
-    #stick.active { opacity: .55; }
+      background: #0006; touch-action: none; opacity: .3; transition: opacity .1s; }
+    #stick.active { opacity: .65; }
     #stickKnob { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%;
       background: #fffb; border: 2px solid #fff; pointer-events: none; }
     /* Aviso para girar o celular (modo paisagem obrigatório) */
@@ -152,9 +152,9 @@
     #touch button { pointer-events: auto; width: 76px; height: 76px; border-radius: 50%; border: 2px solid #fff8;
       background: #0006; color: #fff; font-size: 30px; touch-action: none; }
     #touch button:active { background: #fff5; }
-    /* botões do celular 80% transparentes (20% visíveis) para não atrapalhar a tela; ao tocar ficam mais visíveis */
-    #touch button { opacity: .2; transition: opacity .1s; }
-    #touch button:active { opacity: .55; }
+    /* botões do celular 70% transparentes (30% visíveis) para não atrapalhar a tela; ao tocar ficam mais visíveis */
+    #touch button { opacity: .3; transition: opacity .1s; }
+    #touch button:active { opacity: .65; }
   </style>
 </head>
 <body>

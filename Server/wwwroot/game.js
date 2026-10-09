@@ -179,7 +179,26 @@ document.getElementById('join').addEventListener('click', async () => {
   startPhaser();
 });
 
+// Ajusta o jogo à área visível agora: ao sair da tela cheia, girar o celular ou aparecer/sumir a barra do navegador,
+// o tamanho muda aos poucos; por isso reajusta algumas vezes seguidas.
+function fitGameToWindow() {
+  const el = document.getElementById('game');
+  const vv = window.visualViewport;
+  el.style.width = Math.round(vv ? vv.width : innerWidth) + 'px';
+  el.style.height = Math.round(vv ? vv.height : innerHeight) + 'px';
+  try { phaserGame?.scale?.refresh(); } catch {}
+}
+function fitGameSoon() {
+  fitGameToWindow();
+  [100, 300, 700].forEach(ms => setTimeout(fitGameToWindow, ms));
+}
+['resize', 'orientationchange', 'fullscreenchange', 'webkitfullscreenchange'].forEach(ev => window.addEventListener(ev, fitGameSoon));
+document.addEventListener('fullscreenchange', fitGameSoon);
+document.addEventListener('webkitfullscreenchange', fitGameSoon);
+window.visualViewport?.addEventListener('resize', fitGameSoon);
+
 function startPhaser() {
+  fitGameToWindow();
   phaserGame = new Phaser.Game({
     type: Phaser.AUTO,
     parent: 'game',
