@@ -135,8 +135,33 @@ function createRemote(scene, p, announce = false) {
   remotePlayers[p.id] = { rect, label, name: p.name, targetX: p.x, targetY: p.y };
 }
 
+// ---- Balões de fala sobre a cabeça ----
+let gameScene;
+const bubbles = {}; // id -> { text, expires }
+
+function showBubble(id, message) {
+  if (!gameScene) return;
+  bubbles[id]?.text.destroy();
+  const text = gameScene.add.text(0, 0, message, {
+    fontSize: '14px', color: '#111', backgroundColor: '#ffffff', align: 'center',
+    padding: { x: 8, y: 5 }, wordWrap: { width: 170, useAdvancedWrap: true }
+  }).setOrigin(0.5, 1).setDepth(10);
+  bubbles[id] = { text, expires: gameScene.time.now + 3000 + message.length * 60 };
+}
+
+function updateBubbles(now) {
+  for (const id in bubbles) {
+    const b = bubbles[id];
+    const anchor = id === connection.connectionId ? player : remotePlayers[id]?.rect;
+    if (!anchor || now > b.expires) { b.text.destroy(); delete bubbles[id]; continue; }
+    const half = b.text.width / 2;
+    b.text.setPosition(Phaser.Math.Clamp(anchor.x, half, WORLD_W - half), anchor.y - 50);
+  }
+}
+
 function create() {
   const scene = this;
+  gameScene = this;
 
   createColorTextures(this);
 
@@ -213,6 +238,8 @@ function update(time) {
     lastSent = time; lastX = player.x; lastY = player.y;
   }
 
+  updateBubbles(time);
+
   // Interpolação suave dos remotos
   for (const id in remotePlayers) {
     const r = remotePlayers[id];
@@ -270,7 +297,7 @@ function setupChat() {
   chatOpenBtn.onclick = () => setChatOpen(true);
 
   connection.on('ChatHistory', list => list.forEach(m => addChatLine(m.name, m.text)));
-  connection.on('ChatMessage', m => addChatLine(m.name, m.text));
+  connection.on('ChatMessage', m => { addChatLine(m.name, m.text); showBubble(m.id, m.text); });
 
   document.getElementById('chatForm').onsubmit = e => {
     e.preventDefault();
