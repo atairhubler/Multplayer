@@ -2518,6 +2518,7 @@ function checkMapEdge(delta, left, right, carrier, dashing = false) {
 // ---- Dash: dois toques rápidos para o lado (no chão ou no ar) ----
 function startDash(time, dir) { // devolve true se o dash aconteceu (recarga, empurrão e carona impedem)
   if (time < dashReadyAt || time < pushUntil || ridingMap[myId()]) return false;
+  if (!spendMana(MANA_COST_DASH)) return false; // sem mana, sem dash (a barra pisca)
   dashUntil = time + DASH_MS; dashDir = dir; dashReadyAt = time + DASH_COOLDOWN_MS;
   if (localDancing) setDancing(false);
   dashFx(myId(), dir);
@@ -2600,6 +2601,7 @@ function doAttack() {
   if (!isCombat() || !chatReady || !arenaMeAlive() || ridingMap[myId()]) return;
   const now = Date.now();
   if (now - lastAttackAt < ATTACK_MIN_GAP_MS) return;
+  if (!spendMana(MANA_COST_WEAPON[myWeapon] ?? 4)) return; // sem mana, o golpe não sai
   lastAttackAt = now;
   connection.invoke('Attack', facing).catch(() => {});
 }
@@ -2839,7 +2841,8 @@ const ARENA_HELP = [
   '🗡️ Atacar: aperte Espaço (ou X). O golpe vai para o lado em que você está virado. No celular, use o botão 🗡️.',
   '🎒 Armas: teclas 1 a 5 ou toque nos ícones embaixo — ⚔️ Espada (equilibrada), 🔱 Lança (alcance longo), 🏹 Arco (flecha à distância), 🔨 Martelo (lento, forte e empurra longe), 🐾 Garras (rápidas, dano baixo).',
   '🏆 Pontos: +1 por golpe que acerta e +10 por derrotar alguém. O ranking fica no canto superior esquerdo.',
-  '💨 Dash: toque duas vezes rápido na seta ← ou →. Vale também no ar! (No celular, use o botão 💨 no canto direito, ou empurre a bolinha duas vezes rápido para o lado.)',
+  '🔵 Mana: a barra azul sob a vida. Cada golpe e o dash gastam um pouco; ela recarrega sozinha. Sem mana o golpe não sai (a barra pisca em vermelho).',
+  '💨 Dash: toque duas vezes rápido na seta ← ou → (gasta 20 de mana, a barra azul). Vale também no ar! (No celular, use o botão 💨 no canto direito, ou empurre a bolinha duas vezes rápido para o lado.)',
   '🚪 Sair: ande até o começo da arena (esquerda) e segure ← por um instante para voltar ao vilarejo.',
   'Na arena não dá para subir nas costas, dançar, empurrar ou cumprimentar. Emotes: botão 😀 ou /emote N (de 1 a 6).',
 ];

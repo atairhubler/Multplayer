@@ -47,6 +47,7 @@ const ui = {
   hud: document.getElementById('playerHud'), face: document.getElementById('hudFace'), level: document.getElementById('hudLevel'),
   hpFill: document.getElementById('hudHpFill'), hpText: document.getElementById('hudHpText'),
   xpFill: document.getElementById('hudXpFill'), xpText: document.getElementById('hudXpText'),
+  manaFill: document.getElementById('hudManaFill'), manaText: document.getElementById('hudManaText'),
   pointsValue: document.getElementById('pointsValue'),
 };
 
@@ -67,18 +68,41 @@ async function drawPortrait(canvas, character, crop = true) {
   } catch { /* sem retrato: fica o fundo */ }
 }
 
+// ---------- Mana ----------
+// Barra azul: recarrega sozinha (12 por segundo). O dash gasta 20 e cada golpe gasta um pouco, conforme a arma. Fica só no seu navegador
+// (o servidor não cobra mana), então serve para dar ritmo ao combate; é fácil ajustar os valores abaixo.
+const MANA_MAX = 100, MANA_REGEN_PER_S = 12;
+const MANA_COST_DASH = 20, MANA_COST_WEAPON = [4, 6, 8, 12, 2]; // espada, lança, arco, martelo, garras
+let manaValue = MANA_MAX, manaAt = Date.now();
+function manaNow() {
+  const now = Date.now();
+  manaValue = Math.min(MANA_MAX, manaValue + (now - manaAt) / 1000 * MANA_REGEN_PER_S);
+  manaAt = now;
+  return manaValue;
+}
+function spendMana(cost) {
+  if (manaNow() < cost) {
+    const bar = ui.manaFill.parentElement; bar.classList.add('low'); setTimeout(() => bar.classList.remove('low'), 350); // sem mana: a barra pisca
+    return false;
+  }
+  manaValue -= cost;
+  return true;
+}
+
 let hudKey = '';
 function updateHud() {
   if (ui.hud.hidden) return;
   const pts = totalPoints(), lv = levelInfo(pts);
   const me = arenaById[myId()];
   const hp = isCombat() && me ? me.hp : 100;
-  const key = [hp, pts, lv.level].join('|');
+  const mana = Math.floor(manaNow());
+  const key = [hp, pts, lv.level, mana].join('|');
   if (key === hudKey) return;
   hudKey = key;
   ui.level.textContent = lv.level;
   ui.hpFill.style.width = hp + '%'; ui.hpText.textContent = `${hp} / 100`;
-  ui.xpFill.style.width = lv.pct * 100 + '%'; ui.xpText.textContent = `${pts} / ${lv.to}`;
+  ui.manaFill.style.width = mana + '%'; ui.manaText.textContent = `${mana} / ${MANA_MAX}`;
+  ui.xpFill.style.width = lv.pct * 100 + '%'; ui.xpText.textContent = `XP ${pts} / ${lv.to}`;
   ui.pointsValue.textContent = pts;
   const sp = document.getElementById('screenPoints'); if (sp) sp.textContent = `⭐ ${pts}`;
 }
