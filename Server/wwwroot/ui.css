@@ -20,6 +20,9 @@
 .hudBar.mana { height: 17px; }
 .hudBar.mana i { background: linear-gradient(#4aa0f2, #1c52a6); }
 .hudBar.mana.low { outline: 2px solid #ff5a4a; }
+.hudBar.stamina { height: 15px; }
+.hudBar.stamina i { background: linear-gradient(#6fd36a, #2c8a36); }
+.hudBar.stamina.low { outline: 2px solid #ff5a4a; }
 .hudBar.xp { height: 13px; }
 .hudBar.xp i { background: linear-gradient(#f0c24c, #a97a14); }
 .hudBar span { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: 700 12px 'Alegreya SC', Georgia, serif; letter-spacing: .04em; color: #fff; }
@@ -117,7 +120,7 @@
 /* telas baixas (celular na horizontal) */
 @media (max-height: 430px), (max-width: 760px) {
   #hudPortraitWrap { width: 48px; height: 48px; }
-  #hudBars { width: 140px; } .hudBar { height: 14px; } .hudBar.mana { height: 13px; } .hudBar.xp { height: 10px; } .hudBar span { font-size: 9px; }
+  #hudBars { width: 140px; } .hudBar { height: 14px; } .hudBar.mana { height: 13px; } .hudBar.stamina { height: 12px; } .hudBar.xp { height: 10px; } .hudBar span { font-size: 9px; }
   #online .tbBtn { width: 34px !important; height: 34px; font-size: 15px !important; }
   #pointsChip { font-size: 13px; padding: 2px 8px; }
   #screenHead { min-height: 42px; padding: 4px 12px; } #infoTitle { font-size: 18px; } #infoClose { width: 36px; height: 36px; font-size: 17px; }

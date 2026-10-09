@@ -48,6 +48,7 @@ const ui = {
   hpFill: document.getElementById('hudHpFill'), hpText: document.getElementById('hudHpText'),
   xpFill: document.getElementById('hudXpFill'), xpText: document.getElementById('hudXpText'),
   manaFill: document.getElementById('hudManaFill'), manaText: document.getElementById('hudManaText'),
+  staminaFill: document.getElementById('hudStaminaFill'), staminaText: document.getElementById('hudStaminaText'),
   pointsValue: document.getElementById('pointsValue'),
 };
 
@@ -69,16 +70,31 @@ async function drawPortrait(canvas, character, crop = true) {
 }
 
 // ---------- Mana ----------
-// Barra azul: recarrega sozinha (12 por segundo). O dash gasta 20 e cada golpe gasta um pouco, conforme a arma. Fica só no seu navegador
-// (o servidor não cobra mana), então serve para dar ritmo ao combate; é fácil ajustar os valores abaixo.
-const MANA_MAX = 100, MANA_REGEN_PER_S = 12;
-const MANA_COST_DASH = 20, MANA_COST_WEAPON = [4, 6, 8, 12, 2]; // espada, lança, arco, martelo, garras
-let manaValue = MANA_MAX, manaAt = Date.now();
+// Mana (barra azul): cada golpe gasta um pouco, conforme a arma, e ela recarrega sozinha (12 por segundo).
+// Stamina (barra verde): o dash gasta 30 e ela recarrega (22 por segundo): dá para fazer uns 3 dashes seguidos e depois esperar.
+// As duas ficam só no seu navegador (o servidor não cobra), então servem para dar ritmo ao jogo; é fácil ajustar os valores abaixo.
+const MANA_MAX = 100, MANA_REGEN_PER_S = 12, MANA_COST_WEAPON = [4, 6, 8, 12, 2]; // espada, lança, arco, martelo, garras
+const STAMINA_MAX = 100, STAMINA_REGEN_PER_S = 22, STAMINA_COST_DASH = 30;
+let manaValue = MANA_MAX, manaAt = Date.now(), staminaValue = STAMINA_MAX, staminaAt = Date.now();
 function manaNow() {
   const now = Date.now();
   manaValue = Math.min(MANA_MAX, manaValue + (now - manaAt) / 1000 * MANA_REGEN_PER_S);
   manaAt = now;
   return manaValue;
+}
+function staminaNow() {
+  const now = Date.now();
+  staminaValue = Math.min(STAMINA_MAX, staminaValue + (now - staminaAt) / 1000 * STAMINA_REGEN_PER_S);
+  staminaAt = now;
+  return staminaValue;
+}
+function spendStamina(cost) {
+  if (staminaNow() < cost) {
+    const bar = ui.staminaFill.parentElement; bar.classList.add('low'); setTimeout(() => bar.classList.remove('low'), 350); // sem stamina: a barra pisca
+    return false;
+  }
+  staminaValue -= cost;
+  return true;
 }
 function spendMana(cost) {
   if (manaNow() < cost) {
@@ -95,13 +111,14 @@ function updateHud() {
   const pts = totalPoints(), lv = levelInfo(pts);
   const me = arenaById[myId()];
   const hp = isCombat() && me ? me.hp : 100;
-  const mana = Math.floor(manaNow());
-  const key = [hp, pts, lv.level, mana].join('|');
+  const mana = Math.floor(manaNow()), stamina = Math.floor(staminaNow());
+  const key = [hp, pts, lv.level, mana, stamina].join('|');
   if (key === hudKey) return;
   hudKey = key;
   ui.level.textContent = lv.level;
   ui.hpFill.style.width = hp + '%'; ui.hpText.textContent = `${hp} / 100`;
   ui.manaFill.style.width = mana + '%'; ui.manaText.textContent = `${mana} / ${MANA_MAX}`;
+  ui.staminaFill.style.width = stamina + '%'; ui.staminaText.textContent = `${stamina} / ${STAMINA_MAX}`;
   ui.xpFill.style.width = lv.pct * 100 + '%'; ui.xpText.textContent = `XP ${pts} / ${lv.to}`;
   ui.pointsValue.textContent = pts;
   const sp = document.getElementById('screenPoints'); if (sp) sp.textContent = `⭐ ${pts}`;

@@ -730,7 +730,7 @@ const OLD_AFTER_MS = 12000; // linhas antigas ficam mais apagadas, como em chats
 
 // Usa textContent (nunca innerHTML) para que mensagens não injetem HTML
 // Avisos automáticos do sistema (entrou, bebeu água...) somem sozinhos para não empurrar as conversas: temp = true
-const SYS_LIFETIME_MS = 3000;
+const SYS_LIFETIME_MS = 4000;
 function addChatLine(name, text, temp = false) {
   const p = document.createElement('p');
   if (name === null) {
@@ -780,7 +780,7 @@ function positionChat() {
   moveHint.style.left = r.left + r.width / 2 + 'px';
   moveHint.style.top = r.top + r.height / 2 + 'px';
   if (coarsePointer) { arenaRankEl.style.right = innerWidth - r.right + 8 + 'px'; arenaRankEl.style.top = r.top + 48 + 'px'; arenaRankEl.style.left = 'auto'; }
-  else { arenaRankEl.style.left = r.left + 12 + 'px'; arenaRankEl.style.top = r.top + 84 + 'px'; }
+  else { arenaRankEl.style.left = r.left + 12 + 'px'; arenaRankEl.style.top = r.top + 96 + 'px'; }
   arenaBarEl.style.left = r.left + r.width / 2 + 'px';
   arenaBarEl.style.top = r.top + 8 + 'px'; // no alto, para não cobrir os personagens na calçada
   arenaMsgEl.style.left = r.left + r.width / 2 + 'px';
@@ -1724,7 +1724,9 @@ const ALIASES = {
   ajuda: 'comandos', help: 'comandos', dancar: 'danca', costas: 'subir', montar: 'subir', carregar: 'subir',
   interagir: 'vilarejo', projecao: 'compartilhar', tela: 'compartilhar', cumprimento: 'cumprimentar', empurrao: 'empurrar', titulos: 'titulo',
 };
-const say = lines => lines.forEach(l => addChatLine(null, l));
+// Avisos e orientações (entrou/saiu da voz, erros...) somem do chat em 4 s; sayKeep é para textos longos que se lê com calma (ajuda, listas)
+const say = lines => lines.forEach(l => addChatLine(null, l, true));
+const sayKeep = lines => lines.forEach(l => addChatLine(null, l));
 
 // ---- Janela de ajuda (botão ? no canto inferior direito): grupos que expandem com as orientações ----
 const HELP_GROUPS = [
@@ -1777,7 +1779,7 @@ function runCommand(text) {
   cmd = ALIASES[cmd] || cmd;
 
   if (cmd === 'comandos') {
-    return say([
+    return sayKeep([
       '📜 Comandos (digite cada um para ver como usar):',
       '/emote — emotes sobre a cabeça',
       '/cumprimentar — toca aqui com um amigo',
@@ -1807,14 +1809,14 @@ function runCommand(text) {
     if (a === 'mutar') return toggleMute();
   }
   if (cmd === 'compartilhar') {
-    if (args[0]?.toLowerCase() === 'ajuda') return say(HELP.compartilhar);
+    if (args[0]?.toLowerCase() === 'ajuda') return sayKeep(HELP.compartilhar);
     return share.on ? stopShare() : startShare();
   }
   if (cmd === 'ranking') return showRanking();
   if (cmd === 'perfil') return showProfile();
   if (cmd === 'titulo') return titleCommand(args);
   if (cmd === 'cor' && args[0]) return colorCommand(args[0]);
-  if (HELP[cmd]) return say(HELP[cmd]);
+  if (HELP[cmd]) return sayKeep(HELP[cmd]);
   say([`Comando desconhecido: /${raw}. Digite /comandos para ver a lista.`]);
 }
 
@@ -1824,9 +1826,9 @@ function titleCommand(args) {
   const titles = getTitles();
   if (!args.length) {
     if (!titles.length) {
-      return say(['🏷️ Você ainda não tem títulos.', 'Conquiste jogando: vença o pique-pega, cumprimente 5 vezes ou dance por 90 segundos.']);
+      return sayKeep(['🏷️ Você ainda não tem títulos.', 'Conquiste jogando: vença o pique-pega, cumprimente 5 vezes ou dance por 90 segundos.']);
     }
-    return say(['🏷️ Seus títulos:', ...titles.map((t, i) => `${i + 1}) ${t}${t === localInfo.title ? ' (equipado)' : ''}`),
+    return sayKeep(['🏷️ Seus títulos:', ...titles.map((t, i) => `${i + 1}) ${t}${t === localInfo.title ? ' (equipado)' : ''}`),
       'Use /titulo 1 para equipar o primeiro, ou /titulo nenhum para tirar.']);
   }
   if (args[0].toLowerCase() === 'nenhum') { equipTitle(null); return say(['Título removido.']); }
@@ -2518,7 +2520,7 @@ function checkMapEdge(delta, left, right, carrier, dashing = false) {
 // ---- Dash: dois toques rápidos para o lado (no chão ou no ar) ----
 function startDash(time, dir) { // devolve true se o dash aconteceu (recarga, empurrão e carona impedem)
   if (time < dashReadyAt || time < pushUntil || ridingMap[myId()]) return false;
-  if (!spendMana(MANA_COST_DASH)) return false; // sem mana, sem dash (a barra pisca)
+  if (!spendStamina(STAMINA_COST_DASH)) return false; // sem stamina, sem dash (a barra verde pisca)
   dashUntil = time + DASH_MS; dashDir = dir; dashReadyAt = time + DASH_COOLDOWN_MS;
   if (localDancing) setDancing(false);
   dashFx(myId(), dir);
@@ -2841,8 +2843,9 @@ const ARENA_HELP = [
   '🗡️ Atacar: aperte Espaço (ou X). O golpe vai para o lado em que você está virado. No celular, use o botão 🗡️.',
   '🎒 Armas: teclas 1 a 5 ou toque nos ícones embaixo — ⚔️ Espada (equilibrada), 🔱 Lança (alcance longo), 🏹 Arco (flecha à distância), 🔨 Martelo (lento, forte e empurra longe), 🐾 Garras (rápidas, dano baixo).',
   '🏆 Pontos: +1 por golpe que acerta e +10 por derrotar alguém. O ranking fica no canto superior esquerdo.',
-  '🔵 Mana: a barra azul sob a vida. Cada golpe e o dash gastam um pouco; ela recarrega sozinha. Sem mana o golpe não sai (a barra pisca em vermelho).',
-  '💨 Dash: toque duas vezes rápido na seta ← ou → (gasta 20 de mana, a barra azul). Vale também no ar! (No celular, use o botão 💨 no canto direito, ou empurre a bolinha duas vezes rápido para o lado.)',
+  '🔵 Mana: a barra azul sob a vida. Cada golpe gasta um pouco; ela recarrega sozinha. Sem mana o golpe não sai (a barra pisca em vermelho).',
+  '🟢 Stamina: a barra verde. Cada dash gasta 30 e ela recarrega sozinha; sem stamina o dash não sai.',
+  '💨 Dash: toque duas vezes rápido na seta ← ou → (gasta 30 de stamina, a barra verde). Vale também no ar! (No celular, use o botão 💨 no canto direito, ou empurre a bolinha duas vezes rápido para o lado.)',
   '🚪 Sair: ande até o começo da arena (esquerda) e segure ← por um instante para voltar ao vilarejo.',
   'Na arena não dá para subir nas costas, dançar, empurrar ou cumprimentar. Emotes: botão 😀 ou /emote N (de 1 a 6).',
 ];
