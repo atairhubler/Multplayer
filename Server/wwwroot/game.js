@@ -1,5 +1,5 @@
 // URL do backend no Render (troque após criar o serviço)
-const PRODUCTION_URL = 'https://SEU-APP.onrender.com';
+const PRODUCTION_URL = 'https://plataforma-multiplayer.onrender.com';
 const SERVER_URL = location.hostname.endsWith('github.io') ? PRODUCTION_URL
   : location.protocol.startsWith('http') ? location.origin : 'http://localhost:5000';
 
