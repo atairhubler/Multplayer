@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.SignalR;
 
-public class GameHub(IHubContext<GameHub> hubContext) : Hub
+public class GameHub(IHubContext<GameHub> hubContext, Db db, Sessions sessions) : Hub
 {
     public const string Room = "ForestMap";
     internal static readonly ConcurrentDictionary<string, Player> Players = new();
@@ -73,6 +73,20 @@ public class GameHub(IHubContext<GameHub> hubContext) : Hub
         lock (VoiceLock) inVoice = VoiceMembers.Where(Players.ContainsKey).ToArray();
         await Clients.Caller.SendAsync("VoiceMembers", inVoice);
         await Clients.OthersInGroup(Room).SendAsync("PlayerJoined", player);
+    }
+
+    // Liga esta conexão à conta do jogador (sessão criada em POST /auth/google). Chamado logo depois de JoinGame.
+    public async Task<object> Authenticate(string? sessionToken)
+    {
+        if (!Players.TryGetValue(Context.ConnectionId, out var me)) return new { ok = false };
+        var accountId = sessions.Verify(sessionToken);
+        if (accountId is null || !db.Enabled) return new { ok = false, reason = "sessão inválida ou expirada" };
+        Account? account;
+        try { account = await db.GetAccountAsync(accountId.Value); }
+        catch (Exception) { return new { ok = false, reason = "banco indisponível" }; }
+        if (account is null) return new { ok = false, reason = "conta não encontrada" };
+        me.AccountId = account.Id;
+        return new { ok = true, name = account.Name };
     }
 
     // Cor do nome e título exibido (chamado logo depois de JoinGame; servidores antigos não têm este método)

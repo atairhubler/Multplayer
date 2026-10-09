@@ -25,6 +25,11 @@
     #avatarPreview { width: 36px; height: 54px; object-fit: cover; border: 3px solid #fff; border-radius: 4px; }
     #sprites { position: fixed; inset: 0; pointer-events: none; z-index: 1; overflow: hidden; }
     .gifSprite { position: absolute; left: 0; top: 0; object-fit: cover; transform-origin: 0 0; }
+    #googleBox { margin: 14px 0 14px; font-size: 13px; }
+    #googleBox small { display: block; margin-top: 6px; color: #aab; }
+    #accountBox { padding: 8px 10px; background: #1e3a24; border: 1px solid #3c7a4a; border-radius: 8px; }
+    #accountBox[hidden], #googleBtn[hidden], #googleBox small[hidden] { display: none; }
+    #logoutBtn { width: auto; margin: 0 0 0 8px; padding: 2px 8px; font-size: 12px; }
     #error { color: #f77; margin-top: 10px; min-height: 18px; font-size: 13px; }
     #game { width: 100vw; height: 100vh; height: 100dvh; } /* dvh = só a área visível (sem a barra de endereço do celular) */
     /* Chat estilo MMORPG: canto inferior esquerdo, fundo transparente, sobre o jogo */
@@ -195,6 +200,11 @@
         <input id="avatarFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif">
         <img id="avatarPreview" alt="" hidden>
       </div>
+      <div id="googleBox">
+        <div id="googleBtn"></div>
+        <div id="accountBox" hidden><span id="accountName"></span> <button id="logoutBtn" type="button">Sair da conta</button></div>
+        <small id="googleHint">Opcional: entre com o Google para salvar o seu progresso.</small>
+      </div>
       <button id="join">Entrar no Jogo</button>
       <div id="error"></div>
     </div>
@@ -241,6 +251,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@8.0.7/dist/browser/signalr.min.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="game.js"></script>
 </body>
 </html>

@@ -1,7 +1,7 @@
 // Páginas em cache: logo depois de uma atualização o navegador pode misturar um index.html antigo com este game.js novo
 // (faltam elementos, o script quebra no meio e o personagem "trava" até apertar F5). Se faltar algum elemento, recarrega uma vez.
 (() => {
-  const need = ['join', 'minimap', 'dashBtn', 'stick', 'stickKnob', 'fsBtn', 'fsBtnDesk', 'chat', 'online', 'sfxBtn', 'helpBtn', 'helpModal', 'moveHint', 'arenaRank', 'arenaBar', 'arenaMsg', 'arenaWeapons', 'attackBtn'];
+  const need = ['join', 'googleBtn', 'accountBox', 'accountName', 'logoutBtn', 'minimap', 'dashBtn', 'stick', 'stickKnob', 'fsBtn', 'fsBtnDesk', 'chat', 'online', 'sfxBtn', 'helpBtn', 'helpModal', 'moveHint', 'arenaRank', 'arenaBar', 'arenaMsg', 'arenaWeapons', 'attackBtn'];
   let missing = need.some(id => !document.getElementById(id));
   try {
     if (!missing) { sessionStorage.removeItem('staleReload'); return; }
@@ -132,13 +132,60 @@ dollInputs.forEach(el => el.addEventListener('input', () => {
   drawDollPreview(dollPreview, currentDollConfig());
 }));
 
+// ---- Login opcional com o Google: guarda o progresso numa conta (o jogo continua aceitando entrar só com nome) ----
+const GOOGLE_CLIENT_ID = '872095404882-v2799p9gu2qv973b1hc2g1bcigm93d49.apps.googleusercontent.com'; // público, não é segredo
+const googleBtnEl = document.getElementById('googleBtn'), accountBox = document.getElementById('accountBox');
+const accountNameEl = document.getElementById('accountName'), googleHint = document.getElementById('googleHint');
+let sessionToken = null, accountName = null, googleReady = false;
+try { sessionToken = localStorage.getItem('session'); accountName = localStorage.getItem('accountName'); } catch {}
+
+function showAccount() {
+  const on = !!sessionToken;
+  accountBox.hidden = !on; googleBtnEl.hidden = on; googleHint.hidden = on;
+  accountNameEl.textContent = on ? '✔ Conectado como ' + (accountName || 'sua conta') : '';
+}
+function clearAccount() {
+  sessionToken = accountName = null;
+  try { localStorage.removeItem('session'); localStorage.removeItem('accountName'); } catch {}
+  showAccount();
+}
+async function onGoogleCredential(resp) {
+  const errorEl = document.getElementById('error');
+  errorEl.textContent = 'Entrando com o Google... (se o servidor estava dormindo, pode levar ~1 min)';
+  try {
+    const res = await fetch(SERVER_URL + '/auth/google', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ credential: resp.credential }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Não foi possível entrar com o Google. Tente de novo.');
+    sessionToken = data.token; accountName = data.account?.name || null;
+    try { localStorage.setItem('session', sessionToken); localStorage.setItem('accountName', accountName || ''); } catch {}
+    const nameInput = document.getElementById('name');
+    if (!nameInput.value.trim() && accountName) nameInput.value = accountName;
+    errorEl.textContent = '';
+    showAccount();
+  } catch (e) {
+    errorEl.textContent = e.message || 'Não foi possível entrar com o Google.';
+  }
+}
+function setupGoogle() {
+  if (googleReady || !window.google?.accounts?.id) return;
+  googleReady = true;
+  google.accounts.id.initialize({ client_id: GOOGLE_CLIENT_ID, callback: onGoogleCredential });
+  google.accounts.id.renderButton(googleBtnEl, { theme: 'filled_black', size: 'large', text: 'signin_with', shape: 'pill', locale: 'pt-BR', width: 240 });
+}
+window.onGoogleLibraryLoad = setupGoogle;
+for (let i = 0; i < 20; i++) setTimeout(setupGoogle, 500 * i); // a biblioteca do Google carrega à parte: tenta por ~10 s
+document.getElementById('logoutBtn').addEventListener('click', () => { window.google?.accounts?.id?.disableAutoSelect?.(); clearAccount(); });
+showAccount();
+
 document.getElementById('join').addEventListener('click', async () => {
   unlockAudio(); // precisa acontecer dentro do clique (política dos navegadores)
   if (matchMedia('(pointer: coarse)').matches) { // celular: tela cheia + paisagem (onde o navegador permitir)
     document.documentElement.requestFullscreen?.()
       .then(() => screen.orientation?.lock?.('landscape')).catch(() => {});
   }
-  myName = document.getElementById('name').value.trim() || 'Jogador';
+  myName = document.getElementById('name').value.trim() || accountName || 'Jogador';
   const errorEl = document.getElementById('error');
   errorEl.textContent = '';
   const joinBtn = document.getElementById('join');
@@ -497,6 +544,13 @@ function create() {
   setupArenaEvents();
 
   connection.invoke('JoinGame', myName, myCharacter);
+  // liga esta conexão à conta Google (se o servidor for antigo e não tiver o método, ignora o erro)
+  if (sessionToken) {
+    connection.invoke('Authenticate', sessionToken).then(r => {
+      if (r?.ok) addChatLine(null, '🔐 Conectado com a sua conta Google. Em breve o seu progresso será salvo.', true);
+      else if (r) { clearAccount(); addChatLine(null, '⚠️ Sua sessão do Google expirou. Volte à tela de entrada e entre com o Google de novo para salvar o progresso.'); }
+    }).catch(() => {});
+  }
   // cor do nome e título (se o servidor for antigo e não tiver o método, ignora o erro)
   connection.invoke('UpdateProfile', localInfo.nameColor, localInfo.title).catch(() => {});
 }

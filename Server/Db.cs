@@ -49,8 +49,47 @@ public sealed class Db
             );
             INSERT INTO app_meta (key, value) VALUES ('schema_version', '1')
             ON CONFLICT (key) DO NOTHING;
+
+            -- contas (uma por usuário do Google; google_sub é o identificador estável dele)
+            CREATE TABLE IF NOT EXISTS accounts (
+                id            bigserial PRIMARY KEY,
+                google_sub    text NOT NULL UNIQUE,
+                email         text,
+                display_name  text NOT NULL,
+                picture       text,
+                created_at    timestamptz NOT NULL DEFAULT now(),
+                last_login_at timestamptz NOT NULL DEFAULT now()
+            );
             """);
         await cmd.ExecuteNonQueryAsync();
+    }
+
+    // Cria a conta no primeiro login e atualiza nome/foto/último acesso nos seguintes
+    public async Task<Account> UpsertAccountAsync(string googleSub, string? email, string name, string? picture)
+    {
+        name = name.Length > 40 ? name[..40] : name;
+        await using var cmd = Source.CreateCommand("""
+            INSERT INTO accounts (google_sub, email, display_name, picture)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (google_sub) DO UPDATE
+                SET email = EXCLUDED.email, picture = EXCLUDED.picture, last_login_at = now()
+            RETURNING id, display_name, picture
+            """);
+        cmd.Parameters.AddWithValue(googleSub);
+        cmd.Parameters.AddWithValue((object?)email ?? DBNull.Value);
+        cmd.Parameters.AddWithValue(name);
+        cmd.Parameters.AddWithValue((object?)picture ?? DBNull.Value);
+        await using var r = await cmd.ExecuteReaderAsync();
+        await r.ReadAsync();
+        return new Account(r.GetInt64(0), r.GetString(1), r.IsDBNull(2) ? null : r.GetString(2));
+    }
+
+    public async Task<Account?> GetAccountAsync(long id)
+    {
+        await using var cmd = Source.CreateCommand("SELECT id, display_name, picture FROM accounts WHERE id = $1");
+        cmd.Parameters.AddWithValue(id);
+        await using var r = await cmd.ExecuteReaderAsync();
+        return await r.ReadAsync() ? new Account(r.GetInt64(0), r.GetString(1), r.IsDBNull(2) ? null : r.GetString(2)) : null;
     }
 
     // Teste de saúde: abre conexão, lê a hora do banco e a versão do esquema

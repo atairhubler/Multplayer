@@ -14,6 +14,7 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
 }));
 
 builder.Services.AddSingleton<Db>();
+builder.Services.AddSingleton<Sessions>();
 
 var app = builder.Build();
 
@@ -25,6 +26,8 @@ app.MapGet("/health", () => "ok"); // para ping de keep-alive
 
 // Banco de dados: confere se a conexão com a Neon está funcionando (não mostra senha nem endereço)
 app.MapGet("/db-health", async (Db db) => Results.Json(await db.HealthAsync()));
+
+GoogleAuth.Map(app); // POST /auth/google: login com Google
 
 // Cria as tabelas ao iniciar, sem travar o servidor se o banco estiver indisponível
 app.Lifetime.ApplicationStarted.Register(() => _ = Task.Run(async () =>
