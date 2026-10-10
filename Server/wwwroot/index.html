@@ -23,15 +23,22 @@
     .builder input[type=color] { width: 44px; height: 26px; padding: 0; border: 1px solid #555; background: none; cursor: pointer; }
     .gender { display: flex; gap: 12px; }
     #dollPreview { width: 96px; height: 120px; background: #87ceeb; border-radius: 6px; flex: none; }
-    .upload { display: flex; align-items: center; gap: 10px; margin: 6px 0 18px; font-size: 12px; }
-    .upload input { max-width: 190px; }
-    #avatarPreview { width: 36px; height: 54px; object-fit: cover; border: 3px solid #fff; border-radius: 4px; }
     #sprites { position: fixed; inset: 0; pointer-events: none; z-index: 1; overflow: hidden; }
     .gifSprite { position: absolute; left: 0; top: 0; object-fit: cover; transform-origin: 0 0; }
-    #googleBox { margin: 14px 0 14px; font-size: 13px; }
-    #googleBox small { display: block; margin-top: 6px; color: #aab; }
-    #accountBox { padding: 8px 10px; background: #1e3a24; border: 1px solid #3c7a4a; border-radius: 8px; }
-    #accountBox[hidden], #googleBtn[hidden], #googleBox small[hidden] { display: none; }
+    #accountBox { padding: 8px 10px; background: #1e3a24; border: 1px solid #3c7a4a; border-radius: 8px; font-size: 13px; }
+    section[hidden] { display: none; }
+    .note, #charLimit { display: block; font-size: 12px; color: #aab; margin: 8px 0; }
+    #googleBtn { margin: 14px 0; min-height: 44px; }
+    #charList { display: flex; flex-direction: column; gap: 8px; margin: 10px 0 4px; }
+    .charRow { display: flex; gap: 10px; align-items: center; background: #2c2c34; border-radius: 8px; padding: 6px; }
+    .charThumb { width: 48px; height: 60px; background: #87ceeb; border-radius: 6px; flex: none; }
+    .charInfo { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+    .charInfo b { flex: 1 1 100%; overflow: hidden; text-overflow: ellipsis; }
+    .charInfo button { width: auto; margin: 0; padding: 4px 12px; }
+    button.danger { background: #7a2a2a; color: #fff; }
+    #newCharBtn, #createBtn, #cancelCreateBtn { width: 100%; margin-top: 8px; }
+    #newCharBtn[hidden] { display: none; }
+    button.secondary { background: #444; color: #fff; }
     #logoutBtn { width: auto; margin: 0 0 0 8px; padding: 2px 8px; font-size: 12px; }
     #error { color: #f77; margin-top: 10px; min-height: 18px; font-size: 13px; }
     #game { width: 100vw; height: 100vh; height: 100dvh; } /* dvh = só a área visível (sem a barra de endereço do celular) */
@@ -181,34 +188,41 @@
 <body>
   <div id="login">
     <div class="card">
-      <h2>Entrar no Jogo</h2>
-      <label>Nome</label>
-      <input id="name" type="text" maxlength="16" placeholder="Seu nome">
-      <label>Personagem</label>
-      <div class="builder">
-        <div class="opts">
-          <div class="gender">
-            <label><input type="radio" name="gender" value="m" checked> Masculino</label>
-            <label><input type="radio" name="gender" value="f"> Feminino</label>
-          </div>
-          <label>Cabelo <input type="color" id="cHair" value="#4a2c17"></label>
-          <label>Pele <input type="color" id="cSkin" value="#f1c27d"></label>
-          <label>Roupa <input type="color" id="cCloth" value="#3498db"></label>
-          <label>Nome <input type="color" id="cName" value="#ffffff"></label>
-        </div>
-        <canvas id="dollPreview" width="192" height="240"></canvas>
-      </div>
-      <label>Ou envie sua imagem</label>
-      <div class="upload">
-        <input id="avatarFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif">
-        <img id="avatarPreview" alt="" hidden>
-      </div>
-      <div id="googleBox">
+      <section id="stepGoogle">
+        <h2>Entrar no Jogo</h2>
+        <p class="note">Entre com a sua conta do Google para jogar. Seus personagens, pontos e moedas ficam salvos nela.</p>
         <div id="googleBtn"></div>
-        <div id="accountBox" hidden><span id="accountName"></span> <button id="logoutBtn" type="button">Sair da conta</button></div>
-        <small id="googleHint">Opcional: entre com o Google para salvar o seu progresso.</small>
-      </div>
-      <button id="join">Entrar no Jogo</button>
+      </section>
+
+      <section id="stepChars" hidden>
+        <h2>Seus personagens</h2>
+        <div id="accountBox"><span id="accountName"></span> <button id="logoutBtn" type="button">Sair da conta</button></div>
+        <div id="charList"></div>
+        <small id="charLimit"></small>
+        <button id="newCharBtn" type="button">+ Criar novo personagem</button>
+      </section>
+
+      <section id="stepCreate" hidden>
+        <h2>Novo personagem</h2>
+        <label>Nome</label>
+        <input id="charName" type="text" maxlength="16" placeholder="Nome do personagem">
+        <div class="builder">
+          <div class="opts">
+            <div class="gender">
+              <label><input type="radio" name="gender" value="m" checked> Masculino</label>
+              <label><input type="radio" name="gender" value="f"> Feminino</label>
+            </div>
+            <label>Cabelo <input type="color" id="cHair" value="#4a2c17"></label>
+            <label>Pele <input type="color" id="cSkin" value="#f1c27d"></label>
+            <label>Roupa <input type="color" id="cCloth" value="#3498db"></label>
+            <label>Nome <input type="color" id="cName" value="#ffffff"></label>
+          </div>
+          <canvas id="dollPreview" width="192" height="240"></canvas>
+        </div>
+        <p class="note">Depois de criado, o personagem não pode ser editado (só apagado).</p>
+        <button id="createBtn" type="button">Criar personagem</button>
+        <button id="cancelCreateBtn" type="button" class="secondary">Voltar</button>
+      </section>
       <div id="error"></div>
     </div>
   </div>

@@ -44,7 +44,25 @@ public class GameHub(IHubContext<GameHub> hubContext, Db db, Sessions sessions) 
     private static readonly object VoiceLock = new();
     private static readonly HashSet<string> VoiceMembers = new();
 
-    public async Task JoinGame(string name, string character)
+    internal static bool IsDollConfig(string c) => DollConfig.IsMatch(c);
+    internal static bool IsColor(string c) => ColorPattern.IsMatch(c);
+
+    // Única porta de entrada no jogo: exige sessão do Google e um personagem da própria conta (nome/aparência/cor vêm do banco, não do cliente)
+    public async Task<object> JoinWithCharacter(string? sessionToken, long characterId)
+    {
+        if (Players.ContainsKey(Context.ConnectionId)) return new { ok = false, reason = "Você já está no jogo." };
+        var accountId = sessions.Verify(sessionToken);
+        if (accountId is null || !db.Enabled) return new { ok = false, auth = true, reason = "Sessão inválida ou expirada. Entre com o Google de novo." };
+        CharacterRow? ch; Account? account;
+        try { ch = await db.GetCharacterAsync(accountId.Value, characterId); account = await db.GetAccountAsync(accountId.Value); }
+        catch (Exception) { return new { ok = false, reason = "Banco indisponível. Tente de novo em instantes." }; }
+        if (ch is null || account is null) return new { ok = false, reason = "Personagem não encontrado." };
+        await JoinGame(ch.Name, ch.Character);
+        await Authenticate(account, ch.NameColor);
+        return new { ok = true, name = ch.Name };
+    }
+
+    private async Task JoinGame(string name, string character)
     {
         var sprite = SanitizeCharacter(character);
         if (AvatarPath.IsMatch(sprite) && !AvatarStore.Claim(sprite[9..], Context.ConnectionId)) sprite = DefaultCharacter;
@@ -75,18 +93,11 @@ public class GameHub(IHubContext<GameHub> hubContext, Db db, Sessions sessions) 
         await Clients.OthersInGroup(Room).SendAsync("PlayerJoined", player);
     }
 
-    // Liga esta conexão à conta do jogador (sessão criada em POST /auth/google). Chamado logo depois de JoinGame.
-    public async Task<object> Authenticate(string? sessionToken)
+    // Liga esta conexão à conta do jogador e devolve o que já foi conquistado nela (chamado por JoinWithCharacter)
+    private async Task Authenticate(Account account, string nameColor)
     {
-        if (!Players.TryGetValue(Context.ConnectionId, out var me)) return new { ok = false };
-        var accountId = sessions.Verify(sessionToken);
-        if (accountId is null || !db.Enabled) return new { ok = false, reason = "sessão inválida ou expirada" };
-        Account? account;
-        try { account = await db.GetAccountAsync(accountId.Value); }
-        catch (Exception) { return new { ok = false, reason = "banco indisponível" }; }
-        if (account is null) return new { ok = false, reason = "conta não encontrada" };
+        if (!Players.TryGetValue(Context.ConnectionId, out var me)) return;
         me.AccountId = account.Id;
-        if (DollConfig.IsMatch(me.CharacterSprite)) Progress.SaveCharacter(me.Id, me.CharacterSprite); // guarda a aparência escolhida (bonecos; imagens e GIFs não)
         try
         {
             // devolve o que já foi conquistado nesta conta (títulos, estatísticas, cor do nome...)
@@ -101,12 +112,11 @@ public class GameHub(IHubContext<GameHub> hubContext, Db db, Sessions sessions) 
                 picture = account.Picture,
                 stats = new { points = data.Stats.Points + pend.Points, playerKills = data.Stats.PlayerKills + pend.PlayerKills, slimeKills = data.Stats.SlimeKills + pend.SlimeKills, deaths = data.Stats.Deaths + pend.Deaths, coins = data.Stats.Coins + pend.Coins },
                 titles = data.Titles,
-                nameColor = data.NameColor,
+                nameColor, // a cor do nome é a do personagem escolhido
                 title = data.EquippedTitle,
             });
         }
         catch (Exception) { /* sem os dados salvos o jogo segue normal */ }
-        return new { ok = true, name = account.Name };
     }
 
     // ---------- Loja, inventário e poções (só contas Google) ----------

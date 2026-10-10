@@ -1,7 +1,7 @@
 // Páginas em cache: logo depois de uma atualização o navegador pode misturar um index.html antigo com este game.js novo
 // (faltam elementos, o script quebra no meio e o personagem "trava" até apertar F5). Se faltar algum elemento, recarrega uma vez.
 (() => {
-  const need = ['join', 'potionBtn', 'potionBtnDesk', 'menuBtn', 'infoModal', 'infoBody', 'playerHud', 'screenHead', 'settingsSource', 'googleBtn', 'accountBox', 'accountName', 'logoutBtn', 'minimap', 'dashBtn', 'stick', 'stickKnob', 'fsBtn', 'fsBtnDesk', 'chat', 'online', 'sfxBtn', 'helpBtn', 'helpModal', 'moveHint', 'arenaRank', 'arenaBar', 'arenaMsg', 'arenaWeapons', 'attackBtn'];
+  const need = ['stepGoogle', 'stepChars', 'stepCreate', 'charList', 'newCharBtn', 'createBtn', 'cancelCreateBtn', 'charName', 'potionBtn', 'potionBtnDesk', 'menuBtn', 'infoModal', 'infoBody', 'playerHud', 'screenHead', 'settingsSource', 'googleBtn', 'accountName', 'logoutBtn', 'minimap', 'dashBtn', 'stick', 'stickKnob', 'fsBtn', 'fsBtnDesk', 'chat', 'online', 'sfxBtn', 'helpBtn', 'helpModal', 'moveHint', 'arenaRank', 'arenaBar', 'arenaMsg', 'arenaWeapons', 'attackBtn'];
   let missing = need.some(id => !document.getElementById(id));
   try {
     if (!missing) { sessionStorage.removeItem('staleReload'); return; }
@@ -35,91 +35,8 @@ const mapW = () => (currentMap === 'forest' ? FOREST_W : WORLD_W); // largura do
 const isCombat = () => currentMap === 'arena' || currentMap === 'forest'; // mapas com vida, armas e ranking
 let myName = '';
 let myCharacter = 'char:m:4a2c17:f1c27d:3498db';
-let customImage = null; // data URL do avatar enviado pelo usuário
-
-// ---- Upload de avatar: recorta em 2:3, reduz para 64x96 e comprime ----
-const fileInput = document.getElementById('avatarFile');
-const preview = document.getElementById('avatarPreview');
-const MAX_IMAGE_CHARS = 40000; // imagens estáticas (recomprimidas)
-const MAX_GIF_BYTES = 3 * 1024 * 1024; // GIFs animados são enviados por upload ao servidor (mesmo limite dele)
-
-// Conta os quadros de um GIF percorrendo seus blocos
-function countGifFrames(bytes) {
-  let i = 6, frames = 0;
-  const skipSub = () => { while (i < bytes.length && bytes[i] !== 0) i += bytes[i] + 1; i++; };
-  const flags = bytes[10];
-  i = 13 + (flags & 0x80 ? 3 * (1 << ((flags & 7) + 1)) : 0);
-  while (i < bytes.length) {
-    const b = bytes[i++];
-    if (b === 0x21) { i++; skipSub(); }
-    else if (b === 0x2c) {
-      frames++;
-      const f = bytes[i + 8];
-      i += 9 + (f & 0x80 ? 3 * (1 << ((f & 7) + 1)) : 0) + 1;
-      skipSub();
-    } else break; // 0x3B (fim) ou dado inesperado
-  }
-  return frames;
-}
-
-function readAsDataURL(file) {
-  return new Promise((resolve, reject) => {
-    const fr = new FileReader();
-    fr.onload = () => resolve(fr.result);
-    fr.onerror = () => reject(new Error('Não foi possível ler o arquivo.'));
-    fr.readAsDataURL(file);
-  });
-}
-
-async function processImage(file) {
-  if (file.type === 'image/gif') {
-    const frames = countGifFrames(new Uint8Array(await file.arrayBuffer()));
-    if (frames > 1) { // animado: mantém o arquivo original (recomprimir no canvas perderia a animação)
-      if (file.size > MAX_GIF_BYTES) throw new Error('GIF muito grande (máximo 3 MB).');
-      return readAsDataURL(file);
-    }
-  }
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      const W = 64, H = 96;
-      let sw = img.width, sh = img.height;
-      if (sw / sh > W / H) sw = sh * W / H; else sh = sw * H / W; // recorte central
-      const canvas = document.createElement('canvas');
-      canvas.width = W; canvas.height = H;
-      canvas.getContext('2d').drawImage(img, (img.width - sw) / 2, (img.height - sh) / 2, sw, sh, 0, 0, W, H);
-      for (const [type, q] of [['image/png'], ['image/webp', 0.8], ['image/jpeg', 0.7], ['image/jpeg', 0.4]]) {
-        const data = canvas.toDataURL(type, q);
-        if (data.startsWith('data:' + type) && data.length <= MAX_IMAGE_CHARS) return resolve(data);
-      }
-      reject(new Error('Imagem muito complexa.'));
-    };
-    img.onerror = () => reject(new Error('Arquivo de imagem inválido.'));
-    img.src = url;
-  });
-}
-
-fileInput.addEventListener('change', async () => {
-  const errorEl = document.getElementById('error');
-  errorEl.textContent = '';
-  customImage = null;
-  preview.hidden = true;
-  dollPreview.hidden = false;
-  if (!fileInput.files[0]) return;
-  try {
-    customImage = await processImage(fileInput.files[0]);
-    preview.src = customImage;
-    preview.hidden = false;
-    dollPreview.hidden = true;
-  } catch (e) {
-    errorEl.textContent = e.message;
-    fileInput.value = '';
-    dollPreview.hidden = false;
-  }
-});
-// Mexer no boneco (gênero/cores) descarta a imagem enviada
+// ---- Tela de entrada: só com a conta Google. Depois do login: escolher (ou criar/apagar) um dos até 3 personagens da conta ----
+const MAX_CHARACTERS = 3;
 const dollPreview = document.getElementById('dollPreview');
 const dollInputs = document.querySelectorAll('input[name=gender], #cHair, #cSkin, #cCloth');
 function currentDollConfig() {
@@ -127,45 +44,74 @@ function currentDollConfig() {
   const gender = document.querySelector('input[name=gender]:checked').value;
   return `char:${gender}:${hex('cHair')}:${hex('cSkin')}:${hex('cCloth')}`;
 }
-dollInputs.forEach(el => el.addEventListener('input', () => {
-  customImage = null; preview.hidden = true; fileInput.value = ''; dollPreview.hidden = false;
-  drawDollPreview(dollPreview, currentDollConfig());
-}));
+dollInputs.forEach(el => el.addEventListener('input', () => drawDollPreview(dollPreview, currentDollConfig())));
 
-// ---- Login opcional com o Google: guarda o progresso numa conta (o jogo continua aceitando entrar só com nome) ----
 const GOOGLE_CLIENT_ID = '872095404882-v2799p9gu2qv973b1hc2g1bcigm93d49.apps.googleusercontent.com'; // público, não é segredo
-const googleBtnEl = document.getElementById('googleBtn'), accountBox = document.getElementById('accountBox');
-const accountNameEl = document.getElementById('accountName'), googleHint = document.getElementById('googleHint');
+const googleBtnEl = document.getElementById('googleBtn');
+const stepGoogle = document.getElementById('stepGoogle'), stepChars = document.getElementById('stepChars'), stepCreate = document.getElementById('stepCreate');
+const charListEl = document.getElementById('charList'), newCharBtn = document.getElementById('newCharBtn');
+const loginError = document.getElementById('error');
 let sessionToken = null, accountName = null, googleReady = false;
+let characters = [], chosenCharacter = null; // chosenCharacter = {id, name, character, nameColor}
 try { sessionToken = localStorage.getItem('session'); accountName = localStorage.getItem('accountName'); } catch {}
 
-function showAccount() {
-  const on = !!sessionToken;
-  accountBox.hidden = !on; googleBtnEl.hidden = on; googleHint.hidden = on;
-  accountNameEl.textContent = on ? '✔ Conectado como ' + (accountName || 'sua conta') : '';
+function showStep(step) {
+  stepGoogle.hidden = step !== 'google'; stepChars.hidden = step !== 'chars'; stepCreate.hidden = step !== 'create';
+  loginError.textContent = '';
 }
 function clearAccount() {
-  sessionToken = accountName = null;
+  sessionToken = accountName = null; characters = [];
   try { localStorage.removeItem('session'); localStorage.removeItem('accountName'); } catch {}
-  showAccount();
+  showStep('google');
 }
-// Aparência salva na conta: preenche gênero, cores do boneco e cor do nome na tela de entrada (se for um boneco "char:", não imagem/GIF)
-function applySavedLook(character, nameColor) {
-  if (typeof character === 'string' && /^char:[mf]:[0-9a-f]{6}:[0-9a-f]{6}:[0-9a-f]{6}$/.test(character)) {
-    const [, g, hair, skin, cloth] = character.split(':');
-    document.querySelector('input[name=gender][value=' + g + ']').checked = true;
-    document.getElementById('cHair').value = '#' + hair;
-    document.getElementById('cSkin').value = '#' + skin;
-    document.getElementById('cCloth').value = '#' + cloth;
-    customImage = null; preview.hidden = true; fileInput.value = ''; dollPreview.hidden = false;
-    drawDollPreview(dollPreview, currentDollConfig());
+
+// Chamadas autenticadas de personagens (REST). 401 = sessão vencida → volta ao login do Google.
+async function charApi(method, path, body) {
+  const res = await fetch(SERVER_URL + path, {
+    method, headers: { 'Authorization': 'Bearer ' + sessionToken, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) { clearAccount(); throw new Error(data.error || 'Sua sessão expirou. Entre com o Google de novo.'); }
+  if (!res.ok) throw new Error(data.error || 'Algo deu errado. Tente de novo.');
+  return data;
+}
+
+// Lista de personagens (sem edição: só entrar ou apagar)
+function renderCharacters() {
+  document.getElementById('accountName').textContent = '✔ ' + (accountName || 'Sua conta');
+  charListEl.replaceChildren();
+  for (const c of characters) {
+    const row = document.createElement('div'); row.className = 'charRow';
+    const cv = document.createElement('canvas'); cv.width = 96; cv.height = 120; cv.className = 'charThumb';
+    drawDollPreview(cv, c.character);
+    const info = document.createElement('div'); info.className = 'charInfo';
+    const nm = document.createElement('b'); nm.textContent = c.name; nm.style.color = c.nameColor; // textContent: nunca innerHTML
+    const enter = document.createElement('button'); enter.textContent = 'Entrar';
+    enter.addEventListener('click', () => enterGame(c, enter));
+    const del = document.createElement('button'); del.textContent = 'Apagar'; del.className = 'danger';
+    del.addEventListener('click', async () => {
+      if (!confirm(`Apagar o personagem "${c.name}"? Não dá para desfazer.`)) return;
+      del.disabled = true;
+      try { await charApi('DELETE', '/characters/' + c.id); characters = characters.filter(x => x.id !== c.id); renderCharacters(); }
+      catch (e) { loginError.textContent = e.message; del.disabled = false; }
+    });
+    info.append(nm, enter, del); row.append(cv, info); charListEl.append(row);
   }
-  if (typeof nameColor === 'string' && /^#[0-9a-f]{6}$/i.test(nameColor)) document.getElementById('cName').value = nameColor.toLowerCase();
+  if (!characters.length) { const p = document.createElement('p'); p.className = 'note'; p.textContent = 'Você ainda não tem personagens. Crie o primeiro!'; charListEl.append(p); }
+  newCharBtn.hidden = characters.length >= MAX_CHARACTERS;
+  document.getElementById('charLimit').textContent = `${characters.length}/${MAX_CHARACTERS} personagens`;
+  showStep('chars');
+}
+
+async function loadCharacters() {
+  loginError.textContent = 'Carregando seus personagens... (se o servidor estava dormindo, pode levar ~1 min)';
+  try { characters = await charApi('GET', '/characters'); renderCharacters(); }
+  catch (e) { loginError.textContent = e.message; }
 }
 
 async function onGoogleCredential(resp) {
-  const errorEl = document.getElementById('error');
-  errorEl.textContent = 'Entrando com o Google... (se o servidor estava dormindo, pode levar ~1 min)';
+  loginError.textContent = 'Entrando com o Google... (se o servidor estava dormindo, pode levar ~1 min)';
   try {
     const res = await fetch(SERVER_URL + '/auth/google', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ credential: resp.credential }),
@@ -174,13 +120,11 @@ async function onGoogleCredential(resp) {
     if (!res.ok) throw new Error(data.error || 'Não foi possível entrar com o Google. Tente de novo.');
     sessionToken = data.token; accountName = data.account?.name || null;
     try { localStorage.setItem('session', sessionToken); localStorage.setItem('accountName', accountName || ''); } catch {}
-    const nameInput = document.getElementById('name');
-    if (!nameInput.value.trim() && accountName) nameInput.value = accountName;
-    applySavedLook(data.account?.character, data.account?.nameColor); // o mesmo personagem em qualquer aparelho
-    errorEl.textContent = '';
-    showAccount();
+    characters = data.characters || [];
+    loginError.textContent = '';
+    renderCharacters();
   } catch (e) {
-    errorEl.textContent = e.message || 'Não foi possível entrar com o Google.';
+    loginError.textContent = e.message || 'Não foi possível entrar com o Google.';
   }
 }
 function setupGoogle() {
@@ -192,60 +136,59 @@ function setupGoogle() {
 window.onGoogleLibraryLoad = setupGoogle;
 for (let i = 0; i < 20; i++) setTimeout(setupGoogle, 500 * i); // a biblioteca do Google carrega à parte: tenta por ~10 s
 document.getElementById('logoutBtn').addEventListener('click', () => { window.google?.accounts?.id?.disableAutoSelect?.(); clearAccount(); });
-showAccount();
 
-document.getElementById('join').addEventListener('click', async () => {
+// Criar personagem
+newCharBtn.addEventListener('click', () => { drawDollPreview(dollPreview, currentDollConfig()); showStep('create'); document.getElementById('charName').focus(); });
+document.getElementById('cancelCreateBtn').addEventListener('click', () => showStep('chars'));
+document.getElementById('createBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('createBtn');
+  const name = document.getElementById('charName').value.trim();
+  if (!name) { loginError.textContent = 'Dê um nome ao personagem.'; return; }
+  btn.disabled = true; loginError.textContent = 'Criando...';
+  try {
+    const created = await charApi('POST', '/characters', { name, character: currentDollConfig(), nameColor: cName.value });
+    characters.push(created);
+    document.getElementById('charName').value = '';
+    renderCharacters();
+  } catch (e) { loginError.textContent = e.message; }
+  btn.disabled = false;
+});
+
+// Entrar no jogo com um personagem
+async function enterGame(c, btn) {
   unlockAudio(); // precisa acontecer dentro do clique (política dos navegadores)
   if (matchMedia('(pointer: coarse)').matches) { // celular: tela cheia + paisagem (onde o navegador permitir)
     document.documentElement.requestFullscreen?.()
       .then(() => screen.orientation?.lock?.('landscape')).catch(() => {});
   }
-  myName = document.getElementById('name').value.trim() || accountName || 'Jogador';
-  const errorEl = document.getElementById('error');
-  errorEl.textContent = '';
-  const joinBtn = document.getElementById('join');
+  loginError.textContent = '';
+  btn.disabled = true;
   try { await dollAssetsReady; } catch {
-    errorEl.textContent = 'Não foi possível carregar as imagens do personagem.';
+    loginError.textContent = 'Não foi possível carregar as imagens do personagem.';
+    btn.disabled = false;
     return;
   }
-
-  if (customImage && customImage.startsWith('data:image/gif')) {
-    // GIF animado: sobe o arquivo e usa só a URL devolvida pelo servidor
-    joinBtn.disabled = true;
-    errorEl.textContent = 'Enviando GIF...';
-    try {
-      const res = await fetch(`${SERVER_URL}/avatars`, { method: 'POST', body: fileInput.files[0] });
-      if (!res.ok) throw new Error();
-      myCharacter = (await res.json()).url;
-      errorEl.textContent = '';
-    } catch {
-      errorEl.textContent = 'Não foi possível enviar o GIF. Se o servidor estava dormindo, tente de novo em ~1 min.';
-      joinBtn.disabled = false;
-      return;
-    }
-    joinBtn.disabled = false;
-  } else {
-    myCharacter = customImage || currentDollConfig();
-  }
+  chosenCharacter = c; myName = c.name; myCharacter = c.character; cName.value = c.nameColor;
 
   connection = new signalR.HubConnectionBuilder()
     .withUrl(`${SERVER_URL}/gamehub`)
     .withAutomaticReconnect()
     .build();
-
   try {
     await connection.start();
   } catch (e) {
-    errorEl.textContent = 'Não foi possível conectar. Se o servidor estava dormindo, tente de novo em ~1 min.';
+    loginError.textContent = 'Não foi possível conectar. Se o servidor estava dormindo, tente de novo em ~1 min.';
+    btn.disabled = false;
     return;
   }
 
   document.getElementById('login').style.display = 'none';
-  saveProfile();
   setupChat();
   startMusic();
   startPhaser();
-});
+}
+showStep(sessionToken ? 'chars' : 'google');
+if (sessionToken) loadCharacters(); // já tem sessão salva: vai direto para os personagens
 
 // Ajusta o jogo à área visível agora: ao sair da tela cheia, girar o celular ou aparecer/sumir a barra do navegador,
 // o tamanho muda aos poucos; por isso reajusta algumas vezes seguidas.
@@ -559,16 +502,16 @@ function create() {
 
   setupArenaEvents();
 
-  connection.invoke('JoinGame', myName, myCharacter);
-  // liga esta conexão à conta Google (se o servidor for antigo e não tiver o método, ignora o erro)
-  const sendProfile = () => connection.invoke('UpdateProfile', localInfo.nameColor, localInfo.title).catch(() => {});
-  if (sessionToken) {
-    // com conta: o servidor manda o que está salvo (evento AccountData, que também envia o perfil)
-    connection.invoke('Authenticate', sessionToken).then(r => {
-      if (r?.ok) addChatLine(null, '🔐 Conectado com a sua conta Google. Seus pontos, títulos e cor do nome são salvos automaticamente. Digite /perfil ou /ranking.', true);
-      else { if (r) { clearAccount(); addChatLine(null, '⚠️ Sua sessão do Google expirou. Volte à tela de entrada e entre com o Google de novo para salvar o progresso.'); } sendProfile(); }
-    }).catch(sendProfile);
-  } else sendProfile(); // cor do nome e título (se o servidor for antigo e não tiver o método, ignora o erro)
+  // entra no jogo com o personagem escolhido (o servidor confere a sessão e manda AccountData; nome/aparência vêm do banco)
+  const joinFailed = reason => {
+    addChatLine(null, '⚠️ ' + (reason || 'Não foi possível entrar no jogo.') + ' Recarregando...');
+    setTimeout(() => location.reload(), 3500);
+  };
+  connection.invoke('JoinWithCharacter', sessionToken, chosenCharacter.id).then(r => {
+    if (r?.ok) { addChatLine(null, '🔐 Conectado com a sua conta Google. Seus pontos, títulos e moedas são salvos automaticamente. Digite /perfil ou /ranking.', true); return; }
+    if (r?.auth) clearAccount();
+    joinFailed(r?.reason);
+  }).catch(() => joinFailed('Servidor desatualizado ou indisponível. Tente de novo em instantes.'));
 }
 
 function update(time, delta) {
@@ -1108,43 +1051,8 @@ function updateTagFlash() {
   for (const id in flashState) if (id !== myId() && !remotePlayers[id]) delete flashState[id];
 }
 
-// ---- Lembrar nome e aparência neste navegador ----
-// Guarda nome, gênero e cores (e a imagem estática enviada, que é pequena). GIFs animados
-// não são guardados: dependem do arquivo, então é só escolher de novo.
-function saveProfile() {
-  try {
-    const gender = document.querySelector('input[name=gender]:checked').value;
-    localStorage.setItem('profile', JSON.stringify({
-      name: myName === 'Jogador' && !document.getElementById('name').value.trim() ? '' : myName,
-      gender, hair: cHair.value, skin: cSkin.value, cloth: cCloth.value, nameColor: cName.value,
-      image: customImage && !customImage.startsWith('data:image/gif') ? customImage : null,
-    }));
-  } catch {}
-}
-
-function restoreProfile() {
-  try {
-    const p = JSON.parse(localStorage.getItem('profile') || 'null');
-    if (!p) return;
-    const hex = v => (/^#[0-9a-f]{6}$/i.test(v) ? v : null);
-    if (typeof p.name === 'string') document.getElementById('name').value = p.name.slice(0, 16);
-    const radio = document.querySelector(`input[name=gender][value="${p.gender === 'f' ? 'f' : 'm'}"]`);
-    if (radio) radio.checked = true;
-    cHair.value = hex(p.hair) || cHair.value;
-    cSkin.value = hex(p.skin) || cSkin.value;
-    cCloth.value = hex(p.cloth) || cCloth.value;
-    cName.value = hex(p.nameColor) || cName.value;
-    if (typeof p.image === 'string' && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(p.image) && p.image.length <= MAX_IMAGE_CHARS) {
-      customImage = p.image;
-      preview.src = customImage;
-      preview.hidden = false;
-      dollPreview.hidden = true;
-    }
-  } catch {}
-}
 const cHair = document.getElementById('cHair'), cSkin = document.getElementById('cSkin'), cCloth = document.getElementById('cCloth');
 const cName = document.getElementById('cName');
-restoreProfile();
 drawDollPreview(document.getElementById('dollPreview'), currentDollConfig());
 
 // ---- Lista de online ----
@@ -1602,7 +1510,7 @@ function onAccountData(d) {
   if (typeof renderPotionButtons === 'function') renderPotionButtons(); // (ui.js) botão rápido da poção ativada
   const merged = [...new Set([...getTitles(), ...(d.titles || [])])];
   try { localStorage.setItem('titles', JSON.stringify(merged)); } catch {}
-  if (d.nameColor && /^#[0-9a-f]{6}$/i.test(d.nameColor)) { localInfo.nameColor = d.nameColor; cName.value = d.nameColor; saveProfile(); }
+  if (d.nameColor && /^#[0-9a-f]{6}$/i.test(d.nameColor)) { localInfo.nameColor = d.nameColor; cName.value = d.nameColor; }
   if (d.title && merged.includes(d.title)) { try { localStorage.setItem('title', d.title); } catch {} localInfo.title = d.title; }
   refreshLabel(myId());
   connection.invoke('UpdateProfile', localInfo.nameColor, localInfo.title).catch(() => {}); // grava na conta o perfil que está valendo
@@ -1860,7 +1768,6 @@ function colorCommand(arg) {
   if (!/^#[0-9a-f]{6}$/.test(hex)) return say(['Cor inválida. Use um código como /cor #ff8800 (6 dígitos, de 0 a 9 e a a f).']);
   localInfo.nameColor = hex;
   cName.value = hex;
-  saveProfile();
   refreshLabel(myId());
   connection.invoke('UpdateProfile', hex, localInfo.title).catch(() => {});
   say(['🎨 Cor do nome alterada!']);

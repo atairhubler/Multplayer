@@ -100,8 +100,66 @@ public sealed class Db
                 qty        integer NOT NULL DEFAULT 0 CHECK (qty >= 0),
                 PRIMARY KEY (account_id, item)
             );
+
+            -- personagens da conta (no máximo 3, regra aplicada em CreateCharacterAsync); só bonecos "char:", sem edição
+            CREATE TABLE IF NOT EXISTS account_characters (
+                id         bigserial PRIMARY KEY,
+                account_id bigint NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                name       text NOT NULL,
+                character  text NOT NULL,
+                name_color text NOT NULL DEFAULT '#ffffff',
+                created_at timestamptz NOT NULL DEFAULT now()
+            );
+            CREATE INDEX IF NOT EXISTS account_characters_account_idx ON account_characters (account_id);
             """);
         await cmd.ExecuteNonQueryAsync();
+    }
+
+    public const int MaxCharacters = 3;
+
+    public async Task<List<CharacterRow>> ListCharactersAsync(long accountId)
+    {
+        await using var cmd = Source.CreateCommand("SELECT id, name, character, name_color FROM account_characters WHERE account_id = $1 ORDER BY id");
+        cmd.Parameters.AddWithValue(accountId);
+        var list = new List<CharacterRow>();
+        await using var r = await cmd.ExecuteReaderAsync();
+        while (await r.ReadAsync()) list.Add(new CharacterRow(r.GetInt64(0), r.GetString(1), r.GetString(2), r.GetString(3)));
+        return list;
+    }
+
+    public async Task<CharacterRow?> GetCharacterAsync(long accountId, long characterId)
+    {
+        await using var cmd = Source.CreateCommand("SELECT id, name, character, name_color FROM account_characters WHERE account_id = $1 AND id = $2");
+        cmd.Parameters.AddWithValue(accountId);
+        cmd.Parameters.AddWithValue(characterId);
+        await using var r = await cmd.ExecuteReaderAsync();
+        return await r.ReadAsync() ? new CharacterRow(r.GetInt64(0), r.GetString(1), r.GetString(2), r.GetString(3)) : null;
+    }
+
+    // Cria o personagem se a conta ainda tiver vaga (o limite é conferido e gravado na mesma instrução, sem corrida); null = limite atingido
+    public async Task<CharacterRow?> CreateCharacterAsync(long accountId, string name, string character, string nameColor)
+    {
+        await using var cmd = Source.CreateCommand("""
+            INSERT INTO account_characters (account_id, name, character, name_color)
+            SELECT $1, $2, $3, $4
+            WHERE (SELECT count(*) FROM account_characters WHERE account_id = $1) < $5
+            RETURNING id
+            """);
+        cmd.Parameters.AddWithValue(accountId);
+        cmd.Parameters.AddWithValue(name);
+        cmd.Parameters.AddWithValue(character);
+        cmd.Parameters.AddWithValue(nameColor);
+        cmd.Parameters.AddWithValue(MaxCharacters);
+        var id = await cmd.ExecuteScalarAsync();
+        return id is long l ? new CharacterRow(l, name, character, nameColor) : null;
+    }
+
+    public async Task<bool> DeleteCharacterAsync(long accountId, long characterId)
+    {
+        await using var cmd = Source.CreateCommand("DELETE FROM account_characters WHERE account_id = $1 AND id = $2");
+        cmd.Parameters.AddWithValue(accountId);
+        cmd.Parameters.AddWithValue(characterId);
+        return await cmd.ExecuteNonQueryAsync() > 0;
     }
 
     // Cria a conta no primeiro login e atualiza nome/foto/último acesso nos seguintes

@@ -10,6 +10,8 @@ public record GoogleLoginRequest(string? Credential);
 public record Account(long Id, string Name, string? Picture);
 public record AccountStats(long Points, int PlayerKills, int SlimeKills, int Deaths, long Coins);
 public record AccountData(AccountStats Stats, List<string> Titles, string? NameColor, string? EquippedTitle, string? Character, Dictionary<string, int> Items, string? ActivePotion);
+public record CharacterRow(long Id, string Name, string Character, string NameColor);
+public record CreateCharacterRequest(string? Name, string? Character, string? NameColor);
 public record RankingRow(long AccountId, string Name, long Points, int SlimeKills, int PlayerKills);
 
 public sealed class Sessions
@@ -79,13 +81,52 @@ public static class GoogleAuth
                 return Results.Ok(new
                 {
                     token = sessions.Create(account.Id, TimeSpan.FromDays(30)),
-                    account = new { name = account.Name, picture = account.Picture, character = saved.Character, nameColor = saved.NameColor },
+                    account = new { name = account.Name, picture = account.Picture },
+                    characters = await db.ListCharactersAsync(account.Id),
                 });
             }
             catch (Exception)
             {
                 return Results.Json(new { error = "Não consegui salvar a sua conta. Tente de novo em instantes." }, statusCode: 503);
             }
+        });
+
+        // Personagens da conta (máx. 3, sem edição; só dá para criar e apagar). A sessão vem em "Authorization: Bearer <token>".
+        long? AccountOf(HttpRequest req, Db db, Sessions sessions)
+        {
+            var h = req.Headers.Authorization.ToString();
+            return db.Enabled && h.StartsWith("Bearer ") ? sessions.Verify(h[7..].Trim()) : null;
+        }
+
+        app.MapGet("/characters", async (HttpRequest req, Db db, Sessions sessions) =>
+        {
+            if (AccountOf(req, db, sessions) is not long acc) return Results.Json(new { error = "Sessão inválida. Entre com o Google de novo." }, statusCode: 401);
+            try { return Results.Ok(await db.ListCharactersAsync(acc)); }
+            catch (Exception) { return Results.Json(new { error = "Banco indisponível. Tente de novo." }, statusCode: 503); }
+        });
+
+        app.MapPost("/characters", async (CreateCharacterRequest body, HttpRequest req, Db db, Sessions sessions) =>
+        {
+            if (AccountOf(req, db, sessions) is not long acc) return Results.Json(new { error = "Sessão inválida. Entre com o Google de novo." }, statusCode: 401);
+            var name = System.Text.RegularExpressions.Regex.Replace((body.Name ?? "").Trim(), @"\s+", " ");
+            if (name.Length is < 1 or > 16 || name.Any(char.IsControl)) return Results.Json(new { error = "Dê um nome de 1 a 16 letras ao personagem." }, statusCode: 400);
+            if (body.Character is null || !GameHub.IsDollConfig(body.Character)) return Results.Json(new { error = "Aparência inválida." }, statusCode: 400);
+            var color = body.NameColor is not null && GameHub.IsColor(body.NameColor) ? body.NameColor.ToLowerInvariant() : "#ffffff";
+            try
+            {
+                var created = await db.CreateCharacterAsync(acc, name, body.Character, color);
+                return created is null
+                    ? Results.Json(new { error = $"Você já tem {Db.MaxCharacters} personagens. Apague um para criar outro." }, statusCode: 409)
+                    : Results.Ok(created);
+            }
+            catch (Exception) { return Results.Json(new { error = "Não consegui salvar o personagem. Tente de novo." }, statusCode: 503); }
+        });
+
+        app.MapDelete("/characters/{id:long}", async (long id, HttpRequest req, Db db, Sessions sessions) =>
+        {
+            if (AccountOf(req, db, sessions) is not long acc) return Results.Json(new { error = "Sessão inválida. Entre com o Google de novo." }, statusCode: 401);
+            try { return await db.DeleteCharacterAsync(acc, id) ? Results.Ok(new { ok = true }) : Results.Json(new { error = "Personagem não encontrado." }, statusCode: 404); }
+            catch (Exception) { return Results.Json(new { error = "Não consegui apagar. Tente de novo." }, statusCode: 503); }
         });
     }
 }

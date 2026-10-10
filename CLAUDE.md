@@ -140,3 +140,9 @@ IDs de emote: 0–5 teclado; 6🖐️ 7🤝 8💢 9🎵; 20–26 pontos do vilar
 - Hub: `GetShop`, `BuyItem(id)`, `SetActivePotion(kind|null)`, `UsePotion()` (vida só cura na arena/floresta; mana/stamina são aplicadas no cliente após o "ok"). `AccountData` traz `items` e `activePotion`.
 - Cliente (`ui.js`, seção "Poções"): Menu → Loja/Inventário. No Inventário escolhe-se a poção e **Ativar** a coloca no botão rápido (`#potionBtn` ao lado do ataque no celular, `#potionBtnDesk` círculo no computador; tecla **F**). Ids novos estão na lista `need` do `game.js`.
 - Não testado com o banco real (só com respostas simuladas).
+
+## Entrada só com Google e personagens da conta
+- A tela de entrada tem 3 passos (`#stepGoogle` → `#stepChars` → `#stepCreate`): só dá para entrar com o Google; depois lista os personagens da conta (**sem edição**: só Entrar ou Apagar), com "Criar novo personagem" (**máx. 3**, `Db.MaxCharacters`; o limite é aplicado no `INSERT`). Só bonecos `char:` (o upload de imagem/GIF foi removido da tela de entrada).
+- Tabela `account_characters` (id, account_id, name, character, name_color). REST em `Auth.cs` com `Authorization: Bearer <sessão>`: `GET/POST /characters`, `DELETE /characters/{id}`. `POST /auth/google` devolve também `characters`.
+- O hub **não tem mais `JoinGame` público nem `Authenticate`**: a única entrada é `JoinWithCharacter(sessionToken, characterId)` (nome, aparência e cor do nome vêm do banco). Sem sessão válida não se joga. O cliente chama isso no `create` do Phaser (depois de registrar os handlers). Cliente antigo + servidor novo não entra (recarregar a página resolve).
+- Não testado com Google/banco reais (só compilação e `/characters` sem sessão → 401).
