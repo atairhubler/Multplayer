@@ -22,6 +22,7 @@ public static class ArenaGame
     private static readonly float[] SlimeMults = { 1, 2, 4, 8, 10 };
     private const float SlimeHalfW = 20, SlimeHalfH = 14; // meio corpo de um slime normal (px)
     public const string ForestGroup = "forest";
+    public const string CombatGroup = "combat"; // quem está na arena/floresta: só eles recebem ArenaState, golpes, flechas e danos
 
     // Mesma ordem do cliente: Espada, Lança, Arco, Martelo, Garras
     private record Weapon(string Name, float Range, int Damage, int CooldownMs, float Knock, float Lift, bool Projectile);
@@ -93,8 +94,9 @@ public static class ArenaGame
         return true;
     }
 
+    // Eventos de combate (Arena*, ArrowFired) vão só para quem está em mapa de combate; o resto (ex.: PlayerMap) vai para todos
     private static Task Send(IHubContext<GameHub> hub, string method, params object?[] args) =>
-        hub.Clients.Group(GameHub.Room).SendCoreAsync(method, args); // SendCoreAsync: cada item de args vira um argumento do cliente
+        hub.Clients.Group(method.StartsWith("Arena") || method == "ArrowFired" ? CombatGroup : GameHub.Room).SendCoreAsync(method, args); // SendCoreAsync: cada item de args vira um argumento do cliente
 
     // Lista para o ranking e as barras de vida (arena e floresta; o cliente filtra pelo mapa)
     public static object Snapshot()
@@ -123,6 +125,7 @@ public static class ArenaGame
                 for (var i = 1; i <= SlimeCount; i++) Slimes.Add(NewSlime(i));
             if (!_loopRunning) { _loopRunning = true; _ = Task.Run(() => Loop(hub)); }
         }
+        await hub.Groups.AddToGroupAsync(id, CombatGroup); // antes do BroadcastState, para já receber o estado
         if (map == ForestMap)
         {
             await hub.Groups.AddToGroupAsync(id, ForestGroup);
@@ -144,6 +147,7 @@ public static class ArenaGame
         bool had;
         lock (Gate) { had = InCombat.Remove(id); Arrows.RemoveAll(a => a.Owner == id); }
         await hub.Groups.RemoveFromGroupAsync(id, ForestGroup);
+        await hub.Groups.RemoveFromGroupAsync(id, CombatGroup);
         if (had) await BroadcastState(hub);
     }
 
@@ -390,7 +394,7 @@ public static class ArenaGame
                             }
                         }
                     }
-                    if (now - lastSlimeSend >= 100) { lastSlimeSend = now; slimeSnap = SlimeSnapshot(); }
+                    if (now - lastSlimeSend >= 150) { lastSlimeSend = now; slimeSnap = SlimeSnapshot(); }
 
                     // moedas: quem encostar leva; as que ninguém pegou somem depois de 45 s
                     for (var i = Coins.Count - 1; i >= 0; i--)

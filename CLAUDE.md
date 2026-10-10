@@ -25,7 +25,7 @@ Server/
   GameHub.cs        Hub SignalR (jogadores, chat, emotes, ações sociais, voz, compartilhar tela). Estado 100% em memória.
   TagGame.cs        Pique-pega (loop de 100 ms no servidor)
   ArenaGame.cs      Arena PvP (mapa separado): vida, armas, dano/alcance/recarga, flechas, pontos, ranking, respawn (loop de 50 ms)
-  AvatarStore.cs    GIFs animados enviados por upload (memória, 3 MB cada, 150 MB total, somem ao desconectar)
+  (AvatarStore/upload de GIF removidos para economizar banda do Render)
   Player.cs         Modelo do jogador (Id, Name, CharacterSprite, X, Y, NameColor, Title, Dancing, RidingOn, Sharing)
   wwwroot/
     index.html      Login (nome, gênero, cores, upload de imagem), chat, painel de online, HUD, bandeja de emotes, projeções
@@ -146,3 +146,7 @@ IDs de emote: 0–5 teclado; 6🖐️ 7🤝 8💢 9🎵; 20–26 pontos do vilar
 - Tabela `account_characters` (id, account_id, name, character, name_color). REST em `Auth.cs` com `Authorization: Bearer <sessão>`: `GET/POST /characters`, `DELETE /characters/{id}`. `POST /auth/google` devolve também `characters`.
 - O hub **não tem mais `JoinGame` público nem `Authenticate`**: a única entrada é `JoinWithCharacter(sessionToken, characterId)` (nome, aparência e cor do nome vêm do banco). Sem sessão válida não se joga. O cliente chama isso no `create` do Phaser (depois de registrar os handlers). Cliente antigo + servidor novo não entra (recarregar a página resolve).
 - Não testado com Google/banco reais (só compilação e `/characters` sem sessão → 401).
+
+## Economia de banda (Render Hobby: 5 GB/mês grátis)
+- Upload de GIF (`/avatars`, `AvatarStore`) removido. `PlayerMoved` só vai a quem está no mesmo mapa (ao trocar de mapa, `SendMapPositions` manda as posições atuais a quem chegou). Eventos de combate (`ArenaState`, `Arena*`, `ArrowFired`) vão só ao grupo `combat` (`ArenaGame.CombatGroup`); slimes só ao grupo `forest`. Posição do cliente: `SEND_INTERVAL_MS` 80 ms; `SlimeState` a cada 150 ms.
+- O código de GIF no cliente (`gifSprites`, `/avatars/`) ficou morto (nunca é acionado).

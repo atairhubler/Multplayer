@@ -24,7 +24,7 @@ const FOREST_W = FOREST_TILES.length * FOREST_TILE_W; // 5815
 const FOREST_ART_VERSION = 2; // aumente quando as imagens da floresta mudarem (senão o navegador usa a arte antiga do cache)
 let camX = 0, groundRect = null, forestBg = [], frameCount = 0;
 const GROUND_TOP = 594; // onde os pés ficam: bem perto do limite de baixo, na calçada do fundo
-const SEND_INTERVAL_MS = 50; // throttle: ~20 envios/s
+const SEND_INTERVAL_MS = 80; // throttle: ~12 envios/s (economiza banda do servidor)
 const CHAR_SCALE = 1.4; // tamanho do personagem (1 = 32x48)
 const CHAR_W = Math.round(32 * CHAR_SCALE), CHAR_H = Math.round(48 * CHAR_SCALE);
 const LABEL_DY = CHAR_H / 2 + 14, BUBBLE_DY = CHAR_H / 2 + 26; // nome e balão acima da cabeça

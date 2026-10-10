@@ -65,7 +65,6 @@ public class GameHub(IHubContext<GameHub> hubContext, Db db, Sessions sessions) 
     private async Task JoinGame(string name, string character)
     {
         var sprite = SanitizeCharacter(character);
-        if (AvatarPath.IsMatch(sprite) && !AvatarStore.Claim(sprite[9..], Context.ConnectionId)) sprite = DefaultCharacter;
 
         var player = new Player
         {
@@ -232,7 +231,6 @@ public class GameHub(IHubContext<GameHub> hubContext, Db db, Sessions sessions) 
 
     private const string DefaultCharacter = "char:m:4a2c17:f1c27d:3498db";
     private static readonly Regex DollConfig = new(@"^char:[mf]:[0-9a-f]{6}:[0-9a-f]{6}:[0-9a-f]{6}$", RegexOptions.Compiled);
-    private static readonly Regex AvatarPath = new(@"^/avatars/[0-9a-f]{32}$", RegexOptions.Compiled);
     private static readonly string[] Colors = { "red", "blue", "green", "yellow" };
     private static readonly Regex ImageDataUrl = new(@"^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$", RegexOptions.Compiled);
     private const int MaxImageChars = 40_000;
@@ -244,7 +242,6 @@ public class GameHub(IHubContext<GameHub> hubContext, Db db, Sessions sessions) 
         if (DollConfig.IsMatch(character)) return character; // boneco: gênero + cores de cabelo/pele/roupa
         if (Colors.Contains(character)) return character;
         if (character.Length <= MaxImageChars && ImageDataUrl.IsMatch(character)) return character;
-        if (AvatarPath.IsMatch(character)) return character; // dono é verificado em JoinGame
         return DefaultCharacter;
     }
 
@@ -285,7 +282,9 @@ public class GameHub(IHubContext<GameHub> hubContext, Db db, Sessions sessions) 
         y = Math.Clamp(y, 0, 600);
         player.X = x;
         player.Y = y;
-        await Clients.OthersInGroup(Room).SendAsync("PlayerMoved", player.Id, x, y);
+        // só quem está no mesmo mapa precisa da posição (os outros não veem este jogador)
+        var ids = Players.Values.Where(p => p.Map == player.Map && p.Id != player.Id).Select(p => p.Id).ToList();
+        if (ids.Count > 0) await Clients.Clients(ids).SendAsync("PlayerMoved", player.Id, x, y);
     }
 
     // ---------- Ações sociais ----------
@@ -470,6 +469,13 @@ public class GameHub(IHubContext<GameHub> hubContext, Db db, Sessions sessions) 
         return false;
     }
 
+    // As posições só chegam a quem está no mesmo mapa; ao trocar de mapa, quem chegou recebe a posição atual de todos que já estão lá
+    private async Task SendMapPositions(Player me)
+    {
+        foreach (var p in Players.Values.Where(p => p.Map == me.Map && p.Id != me.Id).ToList())
+            await Clients.Caller.SendAsync("PlayerMoved", p.Id, p.X, p.Y);
+    }
+
     // Muda de mapa andando até a borda
     public async Task ChangeMap(string map)
     {
@@ -492,6 +498,7 @@ public class GameHub(IHubContext<GameHub> hubContext, Db db, Sessions sessions) 
         if (toCombat) await ArenaGame.Enter(hubContext, me.Id, map); else await ArenaGame.Leave(hubContext, me.Id);
         await Clients.Group(Room).SendAsync("PlayerMap", me.Id, me.Map, me.X, me.Y);
         if (toCombat) await Clients.Caller.SendAsync("ArenaState", ArenaGame.Snapshot());
+        await SendMapPositions(me);
     }
 
     // Menu → Cidade: volta ao vilarejo de qualquer mapa (com espera, para não virar fuga fácil de combate)
@@ -510,6 +517,7 @@ public class GameHub(IHubContext<GameHub> hubContext, Db db, Sessions sessions) 
         me.Y = ArenaGame.SpawnY;
         await ArenaGame.Leave(hubContext, me.Id);
         await Clients.Group(Room).SendAsync("PlayerMap", me.Id, me.Map, me.X, me.Y);
+        await SendMapPositions(me);
         return new { ok = true };
     }
 
@@ -617,7 +625,6 @@ public class GameHub(IHubContext<GameHub> hubContext, Db db, Sessions sessions) 
         DanceStartedAt.TryRemove(id, out _);
         DanceSeconds.TryRemove(id, out _);
         foreach (var key in GrantedTitles.Keys.Where(k => k.StartsWith(id + "|"))) GrantedTitles.TryRemove(key, out _);
-        AvatarStore.RemoveOwnedBy(id);
 
         lock (VoiceLock) VoiceMembers.Remove(id);
         if (Players.TryGetValue(id, out var leaving) && leaving.AccountId is long leavingAccount)
